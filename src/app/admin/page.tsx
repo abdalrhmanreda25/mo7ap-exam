@@ -51,22 +51,22 @@ async function AdminHomeContent() {
         description="ابدأ ببناء المنهج، ثم أضف الأسئلة، ثم أنشئ الامتحان وانشره للطلاب."
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
         {stats.map(({ href, label, value, icon: Icon, note }) => (
           <Link
             key={href}
             href={href}
-            className="group rounded-2xl border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+            className="group flex items-center gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm sm:block sm:p-5 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
           >
-            <div className="flex items-start justify-between">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-                <Icon className="size-5" aria-hidden="true" />
-              </span>
-              <ArrowLeft className="size-4 text-muted-foreground transition-transform group-hover:-translate-x-0.5" aria-hidden="true" />
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground sm:size-10">
+              <Icon className="size-5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1 sm:mt-4">
+              <p className="text-sm text-muted-foreground">{label}</p>
+              <p className="text-2xl font-bold tabular-nums text-foreground sm:mt-1 sm:text-3xl">{value}</p>
+              <p className="truncate text-xs text-muted-foreground">{note}</p>
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">{label}</p>
-            <p className="mt-1 text-3xl font-bold tabular-nums text-foreground">{value}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+            <ArrowLeft className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-0.5" aria-hidden="true" />
           </Link>
         ))}
       </div>

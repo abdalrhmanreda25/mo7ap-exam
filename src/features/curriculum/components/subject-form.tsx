@@ -97,7 +97,7 @@ export function SubjectForm({ subject }: { subject?: SubjectDto }) {
       </FormSection>
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={isSubmitting} className="h-11 px-6">
+        <Button type="submit" disabled={isSubmitting} className="h-11 w-full px-6 sm:w-auto">
           {isSubmitting ? "جارٍ الحفظ..." : isEdit ? "حفظ التغييرات" : "إضافة المادة"}
         </Button>
       </div>

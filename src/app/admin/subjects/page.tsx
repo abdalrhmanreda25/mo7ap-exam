@@ -46,7 +46,7 @@ async function SubjectsContent() {
           action={<Link href="/admin/subjects/new" className={buttonVariants()}>إضافة مادة</Link>}
         />
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2">
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {subjects.map((subject) => (
             <li key={subject.id}>
               <Link href={`/admin/subjects/${subject.id}`} className="block space-y-3 rounded-2xl border border-border bg-card p-5 shadow-sm transition-colors hover:border-primary/40">

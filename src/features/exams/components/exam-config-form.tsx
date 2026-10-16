@@ -155,7 +155,7 @@ export function ExamConfigForm({
 
       {!readOnly && (
         <div className="flex justify-end">
-          <Button type="submit" disabled={isSubmitting || (Boolean(exam) && !isDirty)} className="h-11 px-6">
+          <Button type="submit" disabled={isSubmitting || (Boolean(exam) && !isDirty)} className="h-11 w-full px-6 sm:w-auto">
             {isSubmitting ? "جارٍ الحفظ..." : exam ? "حفظ الإعدادات" : "إنشاء مسودة"}
           </Button>
         </div>

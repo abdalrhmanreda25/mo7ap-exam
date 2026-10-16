@@ -63,7 +63,7 @@ async function ExamsContent() {
 
 function ExamList({ exams, subjectName }: { exams: Awaited<ReturnType<typeof listExams>>; subjectName: Map<string, string> }) {
   return (
-    <ul className="grid gap-4 sm:grid-cols-2">
+    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {exams.map((exam) => (
         <li key={exam.id}>
           <Link href={`/admin/exams/${exam.id}`} className="block space-y-3 rounded-2xl border border-border bg-card p-5 shadow-sm transition-colors hover:border-primary/40">
