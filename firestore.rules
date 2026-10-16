@@ -1,0 +1,357 @@
+rules_version = '2';
+
+// Default deny. Every path is closed unless a rule below grants it.
+//
+// Principles:
+//  - Clients never write attempts, answers, results, audit logs, users,
+//    answer keys, or published exam question sets. Those go through trusted
+//    server code (Admin SDK), which bypasses these rules and must re-check everything.
+//  - Deletes are denied everywhere. Academic content is archived with flags.
+//  - Authorization uses the role custom claim AND the users/{uid} profile
+//    (active, role matches). A profile field alone never grants access.
+//  - Nothing is granted to unauthenticated requests.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- identity ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profilePath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    // Active staff check: token claim, profile existence, profile active flag, and profile role must all agree.
+    function isActiveRole(role) {
+      return signedIn()
+        && request.auth.token.get('role', '') == role
+        && exists(profilePath())
+        && get(profilePath()).data.isActive == true
+        && get(profilePath()).data.role == role;
+    }
+
+    function isAdmin() {
+      return isActiveRole('ADMIN');
+    }
+
+    function isStudent() {
+      return isActiveRole('STUDENT');
+    }
+
+    // ---------- write-shape helpers ----------
+
+    function shapeOk(allowedKeys, requiredKeys) {
+      return request.resource.data.keys().hasOnly(allowedKeys)
+        && request.resource.data.keys().hasAll(requiredKeys);
+    }
+
+    function createTimestamps() {
+      return request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function updateTimestamps() {
+      return request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function boundedText(value, max) {
+      return value is string && value.size() > 0 && value.size() <= max;
+    }
+
+    function docExists(collection, id) {
+      return exists(/databases/$(database)/documents/$(collection)/$(id));
+    }
+
+    function docData(collection, id) {
+      return get(/databases/$(database)/documents/$(collection)/$(id)).data;
+    }
+
+    // ---------- users ----------
+    // Profiles are written only by trusted code. Staff read them; the owner reads their own.
+
+    match /users/{uid} {
+      allow read: if isAdmin() || (isStudent() && request.auth.uid == uid);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- curriculum ----------
+
+    match /subjects/{subjectId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.isActive == true);
+
+      allow create: if isAdmin()
+        && shapeOk(
+          ['name', 'nameAr', 'slug', 'description', 'academicYear', 'curriculum',
+           'applicableTracks', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'],
+          ['nameAr', 'slug', 'academicYear', 'applicableTracks', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'])
+        && boundedText(request.resource.data.nameAr, 120)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.applicableTracks is list
+        && request.resource.data.createdBy == request.auth.uid
+        && createTimestamps();
+
+      allow update: if isAdmin()
+        && shapeOk(
+          ['name', 'nameAr', 'slug', 'description', 'academicYear', 'curriculum',
+           'applicableTracks', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'],
+          ['nameAr', 'slug', 'academicYear', 'applicableTracks', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'])
+        && boundedText(request.resource.data.nameAr, 120)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdBy == resource.data.createdBy
+        && updateTimestamps();
+
+      allow delete: if false;
+    }
+
+    match /chapters/{chapterId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.isActive == true);
+
+      allow create: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'title', 'titleAr', 'description', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'titleAr', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+        && docExists('subjects', request.resource.data.subjectId)
+        && boundedText(request.resource.data.titleAr, 160)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdBy == request.auth.uid
+        && createTimestamps();
+
+      allow update: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'title', 'titleAr', 'description', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'titleAr', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.subjectId == resource.data.subjectId
+        && boundedText(request.resource.data.titleAr, 160)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdBy == resource.data.createdBy
+        && updateTimestamps();
+
+      allow delete: if false;
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.isActive == true);
+
+      allow create: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'chapterId', 'title', 'titleAr', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'chapterId', 'titleAr', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+        && docExists('chapters', request.resource.data.chapterId)
+        && docData('chapters', request.resource.data.chapterId).subjectId == request.resource.data.subjectId
+        && boundedText(request.resource.data.titleAr, 160)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdBy == request.auth.uid
+        && createTimestamps();
+
+      allow update: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'chapterId', 'title', 'titleAr', 'order', 'isActive',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'chapterId', 'titleAr', 'order', 'isActive', 'createdBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.subjectId == resource.data.subjectId
+        && request.resource.data.chapterId == resource.data.chapterId
+        && boundedText(request.resource.data.titleAr, 160)
+        && request.resource.data.order is int
+        && request.resource.data.isActive is bool
+        && request.resource.data.createdBy == resource.data.createdBy
+        && updateTimestamps();
+
+      allow delete: if false;
+    }
+
+    // ---------- question bank (admin only; students never read the bank) ----------
+
+    match /questions/{questionId} {
+      allow read: if isAdmin();
+
+      allow create: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'chapterId', 'lessonId', 'type', 'statement', 'statementAr',
+           'mediaReferences', 'difficulty', 'explanation', 'explanationAr', 'status',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'chapterId', 'lessonId', 'type', 'statement', 'difficulty',
+           'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.type in ['SINGLE_CHOICE', 'TRUE_FALSE']
+        && request.resource.data.difficulty in ['EASY', 'MEDIUM', 'HARD']
+        && request.resource.data.status in ['DRAFT', 'READY', 'ARCHIVED']
+        && boundedText(request.resource.data.statement, 4000)
+        && request.resource.data.mediaReferences is list
+        && docExists('lessons', request.resource.data.lessonId)
+        && request.resource.data.createdBy == request.auth.uid
+        && createTimestamps();
+
+      allow update: if isAdmin()
+        && shapeOk(
+          ['subjectId', 'chapterId', 'lessonId', 'type', 'statement', 'statementAr',
+           'mediaReferences', 'difficulty', 'explanation', 'explanationAr', 'status',
+           'createdBy', 'createdAt', 'updatedAt'],
+          ['subjectId', 'chapterId', 'lessonId', 'type', 'statement', 'difficulty',
+           'status', 'createdBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.subjectId == resource.data.subjectId
+        && request.resource.data.status in ['DRAFT', 'READY', 'ARCHIVED']
+        && boundedText(request.resource.data.statement, 4000)
+        && request.resource.data.createdBy == resource.data.createdBy
+        && updateTimestamps();
+
+      allow delete: if false;
+    }
+
+    match /questionOptions/{optionId} {
+      allow read: if isAdmin();
+
+      allow create, update: if isAdmin()
+        && shapeOk(
+          ['questionId', 'text', 'textAr', 'order', 'createdAt', 'updatedAt'],
+          ['questionId', 'text', 'order', 'createdAt', 'updatedAt'])
+        && docExists('questions', request.resource.data.questionId)
+        && boundedText(request.resource.data.text, 500)
+        && request.resource.data.order is int
+        && (request.resource.data.createdAt == request.time
+            || request.resource.data.createdAt == resource.data.createdAt)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // Correct answer for a bank question. Admin-only. Students never read it.
+    match /questionAnswerKeys/{questionId} {
+      allow read: if isAdmin();
+
+      allow create, update: if isAdmin()
+        && shapeOk(['correctOptionId', 'updatedBy', 'updatedAt'],
+                   ['correctOptionId', 'updatedBy', 'updatedAt'])
+        && docExists('questions', questionId)
+        && docExists('questionOptions', request.resource.data.correctOptionId)
+        && docData('questionOptions', request.resource.data.correctOptionId).questionId == questionId
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    // ---------- exams ----------
+
+    match /exams/{examId} {
+      // Students see published exams only. Drafts and closed exams stay hidden from them.
+      // archived is only ever set on CLOSED exams, so PUBLISHED implies not archived.
+      // Keeping this to status alone lets list queries filter on status without extra constraints.
+      allow read: if isAdmin() || (isStudent() && resource.data.status == 'PUBLISHED');
+
+      // Create is always a draft. Publish, close, and freeze go through trusted server code.
+      allow create: if isAdmin()
+        && shapeOk(
+          ['title', 'titleAr', 'description', 'subjectId', 'chapterIds', 'lessonIds',
+           'academicYear', 'durationSeconds', 'maxAttempts', 'status', 'archived',
+           'questionCount', 'maxScore', 'shuffleQuestions', 'shuffleOptions',
+           'showScoreAfterSubmit', 'showCorrectAnswersAfterSubmit', 'showExplanationsAfterSubmit',
+           'publishedAt', 'createdBy', 'createdAt', 'updatedAt', 'version'],
+          ['title', 'titleAr', 'subjectId', 'chapterIds', 'lessonIds', 'academicYear',
+           'durationSeconds', 'maxAttempts', 'status', 'archived', 'questionCount', 'maxScore',
+           'createdBy', 'createdAt', 'updatedAt', 'version'])
+        && request.resource.data.status == 'DRAFT'
+        && request.resource.data.archived == false
+        && request.resource.data.maxAttempts == 1
+        && request.resource.data.durationSeconds is int
+        && request.resource.data.durationSeconds >= 60
+        && request.resource.data.durationSeconds <= 21600
+        && request.resource.data.publishedAt == null
+        && docExists('subjects', request.resource.data.subjectId)
+        && request.resource.data.createdBy == request.auth.uid
+        && createTimestamps();
+
+      // Draft edits only. Published exams are frozen. Closed exams can only toggle archived.
+      allow update: if isAdmin()
+        && resource.data.status == 'DRAFT'
+        && request.resource.data.status == 'DRAFT'
+        && request.resource.data.maxAttempts == 1
+        && request.resource.data.archived == false
+        && request.resource.data.subjectId == resource.data.subjectId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && resource.data.status == 'CLOSED'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['archived', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
+
+      // Exam question set. Editable only while the parent exam is a draft.
+      // Published snapshots are written by publish (server) and never by clients.
+      match /questions/{examQuestionId} {
+        allow read: if isAdmin();
+
+        allow create, update: if isAdmin()
+          && get(/databases/$(database)/documents/exams/$(examId)).data.status == 'DRAFT'
+          && shapeOk(
+            ['questionId', 'order', 'points', 'questionSnapshot', 'optionsSnapshot', 'questionVersion'],
+            ['questionId', 'order', 'points', 'questionSnapshot', 'optionsSnapshot', 'questionVersion'])
+          && request.resource.data.questionId == examQuestionId
+          && request.resource.data.points is int
+          && request.resource.data.points >= 1
+          && request.resource.data.points <= 100;
+
+        allow delete: if isAdmin()
+          && get(/databases/$(database)/documents/exams/$(examId)).data.status == 'DRAFT';
+      }
+
+      // Answer keys for this exam. Clients never touch them. See examAnswerKeys below.
+    }
+
+    // Published answer keys. No client access at all, including admins.
+    // Only trusted server code (Admin SDK) reads or writes these.
+    match /examAnswerKeys/{examId}/items/{examQuestionId} {
+      allow read, write: if false;
+    }
+
+    // ---------- attempts (server-owned) ----------
+
+    match /attempts/{attemptId} {
+      // Owner reads own attempt. Admin reads all. Writes come only from startExam/saveAnswer/submitExam.
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == request.auth.uid);
+      allow create, update, delete: if false;
+
+      match /answers/{examQuestionId} {
+        allow read: if isAdmin()
+          || (isStudent() && get(/databases/$(database)/documents/attempts/$(attemptId)).data.studentId == request.auth.uid);
+        allow create, update, delete: if false;
+      }
+    }
+
+    // ---------- results (immutable for students) ----------
+
+    match /results/{resultId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- audit log (append-only, written by server) ----------
+
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // ---------- default deny ----------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
