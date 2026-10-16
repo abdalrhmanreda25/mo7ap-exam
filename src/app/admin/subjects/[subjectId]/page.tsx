@@ -8,6 +8,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { CurriculumManager } from "@/features/curriculum/components/curriculum-manager";
 import { SubjectForm } from "@/features/curriculum/components/subject-form";
 import { getSubject, listChapters, listLessons } from "@/features/curriculum/service";
+import { ImportDialog } from "@/features/import/components/import-dialog";
 
 export const metadata: Metadata = { title: "تفاصيل المادة" };
 
@@ -46,6 +47,10 @@ async function SubjectDetailContent({ params }: { params: Promise<{ subjectId: s
           <p className="text-sm text-muted-foreground">
             لإخفاء فصل أو درس، ألغِ تحديد «ظاهر» بدلًا من حذفه. الأسئلة المرتبطة به تبقى محفوظة.
           </p>
+          <div className="flex flex-wrap gap-2">
+            <ImportDialog kind="chapters" />
+            <ImportDialog kind="lessons" />
+          </div>
           <CurriculumManager subjectId={subjectId} chapters={chapters} lessons={subjectLessons} />
         </section>
       </div>

@@ -12,6 +12,7 @@ import { listSubjects } from "@/features/curriculum/service";
 import { listQuestions, questionExamUsage } from "@/features/questions/service";
 import { DIFFICULTY_AR, QUESTION_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { QUESTION_STATUSES } from "@/types/firestore";
+import { ImportDialog } from "@/features/import/components/import-dialog";
 
 export const metadata: Metadata = { title: "بنك الأسئلة" };
 
@@ -25,7 +26,12 @@ export default function QuestionsPage({
       <PageHeader
         title="بنك الأسئلة"
         description="أسئلة قابلة لإعادة الاستخدام في عدة امتحانات. محتوى السؤال يُقفل بعد استخدامه في امتحان منشور."
-        actions={<Link href="/admin/questions/new" className={buttonVariants()}>سؤال جديد</Link>}
+        actions={
+          <>
+            <ImportDialog kind="questions" />
+            <Link href="/admin/questions/new" className={buttonVariants()}>سؤال جديد</Link>
+          </>
+        }
       />
       <Suspense fallback={<Skeleton className="h-64 w-full rounded-2xl" />}>
         <QuestionsContent searchParams={searchParams} />

@@ -11,6 +11,7 @@ import { ExamConfigForm } from "@/features/exams/components/exam-config-form";
 import { readinessIssues } from "@/features/exams/composition";
 import { getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
+import { ImportDialog } from "@/features/import/components/import-dialog";
 
 export const metadata: Metadata = { title: "تفاصيل الامتحان" };
 
@@ -71,7 +72,10 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
           />
         </section>
         <section className="space-y-4">
-          <h2 className="text-lg font-bold">الأسئلة والنشر</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-bold">الأسئلة والنشر</h2>
+            {exam.status === "DRAFT" && <ImportDialog kind="examQuestions" examId={exam.id} />}
+          </div>
           <ExamComposer
             examId={exam.id}
             status={exam.status}

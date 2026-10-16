@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listChapters, listSubjects } from "@/features/curriculum/service";
+import { ImportDialog } from "@/features/import/components/import-dialog";
 
 export const metadata: Metadata = { title: "المواد والمنهج" };
 
@@ -30,7 +31,12 @@ async function SubjectsContent() {
       <PageHeader
         title="المواد والمنهج"
         description="المواد والفصول والدروس. تُدار هنا كبيانات، ولا توجد قائمة ثابتة في الكود."
-        actions={<Link href="/admin/subjects/new" className={buttonVariants()}>إضافة مادة</Link>}
+        actions={
+          <>
+            <ImportDialog kind="subjects" />
+            <Link href="/admin/subjects/new" className={buttonVariants()}>إضافة مادة</Link>
+          </>
+        }
       />
       {subjects.length === 0 ? (
         <EmptyState
