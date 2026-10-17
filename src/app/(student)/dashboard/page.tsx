@@ -34,7 +34,10 @@ async function DashboardContent() {
   ]);
 
   const activeSubjects = subjects.filter((s) => s.isActive);
-  const results = resultsSnap.docs.map((d) => d.data() as { percentage: number; examId: string; submittedAt: { toMillis(): number } });
+  // Results replaced by a reopened exam stay in history but do not count toward current stats.
+  const results = resultsSnap.docs
+    .map((d) => d.data() as { percentage: number; examId: string; superseded?: boolean })
+    .filter((r) => !r.superseded);
   const completed = results.length;
   const average = completed === 0 ? null : Math.round((results.reduce((sum, r) => sum + r.percentage, 0) / completed) * 100) / 100;
   const firstName = user.displayName.split(" ")[0] || "";

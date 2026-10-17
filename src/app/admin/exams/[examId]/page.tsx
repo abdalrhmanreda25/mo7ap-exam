@@ -11,6 +11,7 @@ import { ExamConfigForm } from "@/features/exams/components/exam-config-form";
 import { readinessIssues } from "@/features/exams/composition";
 import { countExamAttempts, getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
 import { DeleteExamButton } from "@/features/exams/components/delete-exam-button";
+import { ReopenAllButton } from "@/features/students/components/student-actions";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 
@@ -88,6 +89,15 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
             issues={issues}
           />
         </section>
+        {exam.status !== "DRAFT" && (
+          <section className="space-y-3 rounded-2xl border border-border bg-card p-5">
+            <h2 className="text-lg font-bold">إعادة الامتحان</h2>
+            <p className="text-sm text-muted-foreground">
+              يسمح لكل طالب أنهى الامتحان بإعادته. النتائج السابقة تبقى محفوظة في السجل. لإعادته لطالب واحد، افتح صفحة الطالب.
+            </p>
+            <ReopenAllButton examId={exam.id} />
+          </section>
+        )}
         <section className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5">
           <h2 className="text-lg font-bold text-destructive">منطقة الخطر</h2>
           <p className="text-sm text-muted-foreground">

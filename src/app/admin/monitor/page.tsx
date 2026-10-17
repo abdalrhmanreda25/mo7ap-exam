@@ -6,6 +6,7 @@ import { Video } from "lucide-react";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { PageHeader, StatusBadge } from "@/components/layout/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { buttonVariants } from "@/components/ui/button";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/types/firestore";
 
@@ -14,7 +15,11 @@ export const metadata: Metadata = { title: "مراقبة الامتحانات" }
 export default function MonitorPage() {
   return (
     <>
-      <PageHeader title="مراقبة الامتحانات" description="الطلاب الذين يؤدون امتحانًا الآن. البث مباشر فقط ولا يُحفظ." />
+      <PageHeader
+        title="مراقبة الامتحانات"
+        description="الطلاب الذين يؤدون امتحانًا الآن. البث مباشر فقط ولا يُحفظ."
+        actions={<Link href="/admin/monitor/all" className={buttonVariants()}>عرض كل الكاميرات</Link>}
+      />
       <Suspense fallback={<Skeleton className="h-64 w-full rounded-2xl" />}>
         <MonitorList />
       </Suspense>

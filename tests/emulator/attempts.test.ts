@@ -8,6 +8,7 @@ const curriculum = await import("@/features/curriculum/service");
 const questions = await import("@/features/questions/service");
 const exams = await import("@/features/exams/service");
 const attempts = await import("@/features/attempts/service");
+const students = await import("@/features/students/service");
 
 const db = getAdminDb();
 const ADMIN = "test-admin";
@@ -170,5 +171,55 @@ describe("attempt engine (Firestore emulator)", () => {
     await attempts.submitAttempt(db, STUDENT, id);
     await attempts.recordFullscreenExit(db, STUDENT, id);
     expect((await db.collection("attempts").doc(id).get()).data()!.fullscreenExits).toBe(2);
+  });
+
+  it("reopen moves attempt, answers, and result to history and lets the student start again", async () => {
+    const { examId, q1 } = await publishedExam();
+    const id = await attempts.startExam(db, STUDENT, examId);
+    await attempts.saveAnswer(db, STUDENT, id, q1, "b", 1);
+    await attempts.submitAttempt(db, STUDENT, id);
+
+    const archived = await students.reopenAttempt(db, ADMIN, id, "إعادة بطلب الطالب");
+    expect(archived).toBe(`${id}__v1`);
+
+    expect((await db.collection("attempts").doc(id).get()).exists).toBe(false);
+    expect((await db.collection("results").doc(id).get()).exists).toBe(false);
+    const old = (await db.collection("attempts").doc(archived).get()).data()!;
+    expect(old).toMatchObject({ status: "GRADED", score: 2, superseded: true, reopenReason: "إعادة بطلب الطالب" });
+    expect((await db.collection("attempts").doc(archived).collection("answers").doc(q1).get()).data()?.selectedOptionId).toBe("b");
+    expect((await db.collection("results").doc(archived).get()).data()).toMatchObject({ score: 2, superseded: true });
+
+    const again = await attempts.startExam(db, STUDENT, examId);
+    expect(again).toBe(id);
+    expect((await db.collection("attempts").doc(again).get()).data()!.status).toBe("IN_PROGRESS");
+    expect((await attempts.getAttemptView(db, STUDENT, again))!.answers).toEqual({});
+
+    const log = await db.collection("auditLogs").where("action", "==", "EXAM_REOPENED_FOR_STUDENT").where("targetId", "==", id).get();
+    expect(log.size).toBe(1);
+  });
+
+  it("refuses to reopen an attempt still in progress", async () => {
+    const { examId } = await publishedExam();
+    const id = await attempts.startExam(db, STUDENT, examId);
+    await expect(students.reopenAttempt(db, ADMIN, id, "سبب")).rejects.toThrow("جارية");
+  });
+
+  it("second reopen gets the next history version", async () => {
+    const { examId } = await publishedExam();
+    const id = await attempts.startExam(db, STUDENT, examId);
+    await attempts.submitAttempt(db, STUDENT, id);
+    await students.reopenAttempt(db, ADMIN, id, "أول");
+    await attempts.startExam(db, STUDENT, examId);
+    await attempts.submitAttempt(db, STUDENT, id);
+    expect(await students.reopenAttempt(db, ADMIN, id, "ثاني")).toBe(`${id}__v2`);
+  });
+
+  it("reopen for all reopens finished attempts and skips in-progress ones", async () => {
+    const { examId } = await publishedExam();
+    const done = await attempts.startExam(db, STUDENT, examId);
+    await attempts.submitAttempt(db, STUDENT, done);
+    await attempts.startExam(db, OTHER, examId);
+    const outcome = await students.reopenExamForAll(db, ADMIN, examId, "إعادة للجميع");
+    expect(outcome).toMatchObject({ reopened: 1, skipped: 1 });
   });
 });
