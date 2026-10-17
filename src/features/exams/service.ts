@@ -481,3 +481,35 @@ export async function listAddableQuestions(db: Firestore, subjectId: string, exc
       lessonId: doc.data().lessonId as string,
     }));
 }
+
+/**
+ * Hard delete. Refused when any student attempt exists, because attempts and results are history.
+ * Those exams can only be archived. Deletes the question set and answer keys with the exam.
+ */
+export async function deleteExam(db: Firestore, actorUid: string, examId: string) {
+  const examRef = db.collection(COLLECTIONS.exams).doc(examId);
+  const exam = await examRef.get();
+  if (!exam.exists) throw new DomainError("الامتحان غير موجود.");
+
+  const attempts = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).limit(1).get();
+  if (!attempts.empty) {
+    throw new DomainError("لا يمكن حذف امتحان بدأه طلاب. أرشفه بدلًا من ذلك.");
+  }
+
+  const title = String(exam.data()?.titleAr ?? "");
+  const audit = auditLogWrite(db, actorUid, {
+    action: "EXAM_DELETED",
+    targetType: "exam",
+    targetId: examId,
+    metadata: { titleAr: title, status: exam.data()?.status ?? null },
+  });
+  await audit.ref.set(audit.data);
+
+  await db.recursiveDelete(examRef);
+  await db.recursiveDelete(db.collection(COLLECTIONS.examAnswerKeys).doc(examId));
+}
+
+export async function countExamAttempts(db: Firestore, examId: string): Promise<number> {
+  const snap = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).count().get();
+  return snap.data().count;
+}

@@ -9,7 +9,8 @@ import { listSubjects } from "@/features/curriculum/service";
 import { ExamComposer, type ComposedItem } from "@/features/exams/components/exam-composer";
 import { ExamConfigForm } from "@/features/exams/components/exam-config-form";
 import { readinessIssues } from "@/features/exams/composition";
-import { getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
+import { countExamAttempts, getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
+import { DeleteExamButton } from "@/features/exams/components/delete-exam-button";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 
@@ -48,6 +49,8 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
     hasKey: c.correctOptionId !== null,
   }));
 
+  const attemptCount = await countExamAttempts(db, examId);
+
   const tone = exam.status === "PUBLISHED" ? "success" : exam.status === "DRAFT" ? "primary" : "neutral";
 
   return (
@@ -84,6 +87,15 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
             pool={pool.map((q) => ({ id: q.id, statementAr: q.statementAr, statement: q.statement, difficulty: q.difficulty }))}
             issues={issues}
           />
+        </section>
+        <section className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5">
+          <h2 className="text-lg font-bold text-destructive">منطقة الخطر</h2>
+          <p className="text-sm text-muted-foreground">
+            {attemptCount > 0
+              ? `بدأ هذا الامتحان ${attemptCount} محاولة. لا يمكن حذفه، ويمكنك أرشفته بعد إغلاقه.`
+              : "لم يبدأه أي طالب. يمكن حذفه نهائيًا."}
+          </p>
+          <DeleteExamButton examId={exam.id} disabled={attemptCount > 0} />
         </section>
       </div>
     </>

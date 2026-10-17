@@ -76,10 +76,16 @@ async function main() {
   console.log("questions ready:", questionIds.length);
 
   // Exam
+  // Replace an older version of this exam (different question count) only if no student has started it.
   const existingExam = await db.collection(COLLECTIONS.exams).where("titleAr", "==", data.exam.titleAr).limit(1).get();
   if (!existingExam.empty) {
-    console.log("exam exists", existingExam.docs[0].id, existingExam.docs[0].data().status);
-    return;
+    const oldId = existingExam.docs[0].id;
+    if (existingExam.docs[0].data().questionCount === questionIds.length) {
+      console.log("exam exists", oldId, existingExam.docs[0].data().status);
+      return;
+    }
+    await exams.deleteExam(db, ACTOR, oldId);
+    console.log("deleted older version", oldId);
   }
   const examId = await exams.createDraftExam(db, ACTOR, {
     title: data.exam.title,

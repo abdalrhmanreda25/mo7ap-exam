@@ -6,9 +6,19 @@ const tag = `${Date.now().toString(36)}`;
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
   await page.waitForLoadState("networkidle");
-  await page.getByLabel("البريد الإلكتروني").fill(ACCOUNTS.admin.email);
-  await page.getByLabel("كلمة المرور").fill(TEST_PASSWORD);
-  await page.getByRole("button", { name: "تسجيل الدخول" }).click();
+  // Retry once: a click before React hydrates is lost and the page stays on /login.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.getByLabel("البريد الإلكتروني").fill(ACCOUNTS.admin.email);
+    await page.getByLabel("كلمة المرور").fill(TEST_PASSWORD);
+    await page.getByRole("button", { name: "تسجيل الدخول" }).click();
+    try {
+      await expect(page).toHaveURL(/\/admin$/, { timeout: 8000 });
+      return;
+    } catch {
+      await page.goto("/login");
+      await page.waitForLoadState("networkidle");
+    }
+  }
   await expect(page).toHaveURL(/\/admin$/);
 }
 

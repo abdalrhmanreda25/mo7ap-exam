@@ -72,3 +72,10 @@ export async function archiveExamAction(examId: string) {
     return { id: examId };
   });
 }
+
+export async function deleteExamAction(examId: string) {
+  return runAdminAction(async (actor) => {
+    await service.deleteExam(db(), actor, idSchema.parse(examId));
+    return { id: examId };
+  });
+}
