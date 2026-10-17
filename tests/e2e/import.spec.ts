@@ -8,6 +8,7 @@ const tag = Date.now().toString(36);
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("البريد الإلكتروني").fill(ACCOUNTS.admin.email);
   await page.getByLabel("كلمة المرور").fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "تسجيل الدخول" }).click();
