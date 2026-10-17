@@ -1,5 +1,5 @@
 import { connectFirestoreEmulator, getFirestore, type Firestore } from "firebase/firestore";
-import { getClientApp } from "./client";
+import { getClientApp, getClientAuth } from "./client";
 import { shouldUseAuthEmulator } from "./config";
 
 let cached: Firestore | null = null;
@@ -10,6 +10,8 @@ let cached: Firestore | null = null;
  */
 export function getClientDb(): Firestore {
   if (cached) return cached;
+  // Auth must be registered before Firestore starts, or Firestore sends requests without the user's token.
+  getClientAuth();
   const db = getFirestore(getClientApp());
   if (shouldUseAuthEmulator()) {
     connectFirestoreEmulator(db, "127.0.0.1", 8181);

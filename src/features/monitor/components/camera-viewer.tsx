@@ -89,8 +89,9 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
     let closed = false;
     pc.ontrack = (event) => {
       if (videoRef.current) videoRef.current.srcObject = event.streams[0];
-      setStatus("live");
     };
+    const remoteCandidates: RTCIceCandidateInit[] = [];
+    let remoteReady = false;
     pc.onicecandidate = (event) => {
       if (event.candidate && !closed) {
         addDoc(collection(sessionRef, "adminCandidates"), event.candidate.toJSON()).catch((err: { code?: string }) =>
@@ -99,6 +100,8 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
       }
     };
     pc.onconnectionstatechange = () => {
+      // "Live" means media can actually flow, not just that a track was negotiated.
+      if (pc.connectionState === "connected") setStatus("live");
       if (pc.connectionState === "failed") {
         setStatus("error");
         setError("فشل الاتصال بالكاميرا. أعد تحميل الصفحة.");
@@ -108,6 +111,8 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
     void (async () => {
       try {
         await pc.setRemoteDescription(offer);
+        remoteReady = true;
+        remoteCandidates.splice(0).forEach((c) => pc.addIceCandidate(c).catch(() => undefined));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         await updateDoc(sessionRef, { answer: { type: answer.type, sdp: answer.sdp }, updatedAt: serverTimestamp() });
@@ -124,9 +129,10 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
         collection(sessionRef, "studentCandidates"),
         (snap) => {
           snap.docChanges().forEach((change) => {
-            if (change.type === "added" && !closed) {
-              pc.addIceCandidate(change.doc.data()).catch(() => undefined);
-            }
+            if (change.type !== "added" || closed) return;
+            const candidate = change.doc.data() as RTCIceCandidateInit;
+            if (remoteReady) pc.addIceCandidate(candidate).catch(() => undefined);
+            else remoteCandidates.push(candidate);
           });
         },
         (err) => {

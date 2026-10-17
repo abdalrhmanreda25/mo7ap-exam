@@ -481,5 +481,19 @@ describe("camera signaling (monitorSessions)", () => {
     await assertFails(deleteDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s3")));
     await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s4"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
   });
+
+  it("reading a session that does not exist yet is denied (so the client must not pre-read)", async () => {
+    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "not-yet")));
+  });
+
+  it("the same full write works for a new session and for a reconnect", async () => {
+    const db = asUser(STUDENT, "STUDENT");
+    const write = () => setDoc(doc(db, "monitorSessions", "reconnect"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() });
+    await assertSucceeds(write());
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), "monitorSessions", "reconnect"), { answer });
+    });
+    await assertSucceeds(write());
+  });
 });
 

@@ -40,6 +40,7 @@ test.describe("Camera monitoring (live, no storage)", () => {
     await admin.goto("/admin/monitor");
     await admin.getByRole("link", { name: /اختبار سريع E2E/ }).first().click();
     await expect(admin.getByText("مباشر")).toBeVisible({ timeout: 60000 });
+    await expect(student.getByText("متصل بالمشرف")).toBeVisible({ timeout: 30000 });
 
     await studentCtx.close();
     await adminCtx.close();

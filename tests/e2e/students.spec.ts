@@ -30,7 +30,9 @@ test.describe("Admin: students, reopen exam, camera grid", () => {
     await signIn(admin, ACCOUNTS.admin.email, /\/admin$/);
 
     await admin.goto("/admin/students");
+    await admin.waitForLoadState("networkidle");
     await admin.getByRole("link", { name: new RegExp(ACCOUNTS.student.name) }).click();
+    await expect(admin).toHaveURL(/\/admin\/students\/[A-Za-z0-9_-]+$/, { timeout: 15000 });
     await expect(admin.getByText("اختبار سريع E2E")).toBeVisible();
 
     await admin.getByRole("button", { name: "إعادة فتح الامتحان" }).first().click();
