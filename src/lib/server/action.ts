@@ -10,11 +10,20 @@ import { DomainError } from "./errors";
  * so the role check happens here on every call, not only in the page layout.
  * Errors become typed results. Stack traces and raw Firestore messages never reach the client.
  */
-export async function runAdminAction<T>(
-  task: (actorUid: string) => Promise<T>,
+export async function runAdminAction<T>(task: (actorUid: string) => Promise<T>): Promise<ActionResult<T>> {
+  return runSessionAction("ADMIN", task);
+}
+
+export async function runStudentAction<T>(task: (studentUid: string) => Promise<T>): Promise<ActionResult<T>> {
+  return runSessionAction("STUDENT", task);
+}
+
+async function runSessionAction<T>(
+  role: "ADMIN" | "STUDENT",
+  task: (uid: string) => Promise<T>,
 ): Promise<ActionResult<T>> {
   const user = await getSessionUser();
-  if (!user || user.role !== "ADMIN") {
+  if (!user || user.role !== role) {
     return { ok: false, message: "ليست لديك صلاحية لتنفيذ هذا الإجراء." };
   }
 
