@@ -10,6 +10,7 @@ import { QuestionPreview } from "@/features/questions/components/question-previe
 import { reportResult } from "@/lib/client/result";
 import { saveAnswerAction, submitAttemptAction } from "../actions";
 import { formatRemaining } from "../time";
+import { FullscreenControl } from "./fullscreen-control";
 import type { AttemptView } from "../service";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -127,6 +128,7 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
             {formatRemaining(remainingMs)}
           </div>
         </div>
+        <FullscreenControl attemptId={view.attemptId} active={!locked} />
         <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${total ? (answeredCount / total) * 100 : 0}%` }} />
         </div>

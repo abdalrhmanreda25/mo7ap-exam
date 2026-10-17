@@ -158,4 +158,17 @@ describe("attempt engine (Firestore emulator)", () => {
     const again = await attempts.getAttemptView(db, STUDENT, id);
     expect(again!.questions.map((q) => q.examQuestionId)).toEqual(view!.questions.map((q) => q.examQuestionId));
   });
+
+  it("counts fullscreen exits for the owner only, and only while the attempt is active", async () => {
+    const { examId } = await publishedExam();
+    const id = await attempts.startExam(db, STUDENT, examId);
+    await attempts.recordFullscreenExit(db, STUDENT, id);
+    await attempts.recordFullscreenExit(db, STUDENT, id);
+    expect((await db.collection("attempts").doc(id).get()).data()!.fullscreenExits).toBe(2);
+    await expect(attempts.recordFullscreenExit(db, OTHER, id)).rejects.toThrow();
+
+    await attempts.submitAttempt(db, STUDENT, id);
+    await attempts.recordFullscreenExit(db, STUDENT, id);
+    expect((await db.collection("attempts").doc(id).get()).data()!.fullscreenExits).toBe(2);
+  });
 });

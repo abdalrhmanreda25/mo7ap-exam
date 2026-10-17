@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomInt } from "node:crypto";
-import { Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { attemptIdFor, resultIdFor } from "@/lib/domain/ids";
 import { canTransitionAttempt, decideAnswerSave, decideStart, isDeadlinePassed } from "@/lib/domain/state";
 import { DomainError } from "@/lib/server/errors";
@@ -352,3 +352,12 @@ export async function getExamForStudent(db: Firestore, examId: string) {
   return { ...exam, id: snap.id, description: exam.description ?? "" };
 }
 
+
+/** Counts each time the student leaves fullscreen during an active attempt. Admin-visible evidence, not a block. */
+export async function recordFullscreenExit(db: Firestore, studentId: string, attemptId: string): Promise<void> {
+  const ref = db.collection(COLLECTIONS.attempts).doc(attemptId);
+  const snap = await ref.get();
+  if (!snap.exists || snap.data()!.studentId !== studentId) throw new DomainError("المحاولة غير موجودة.");
+  if (snap.data()!.status !== "IN_PROGRESS") return;
+  await ref.update({ fullscreenExits: FieldValue.increment(1), updatedAt: Timestamp.fromMillis(Date.now()) });
+}

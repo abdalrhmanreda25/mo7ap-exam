@@ -41,3 +41,10 @@ export async function submitAttemptAction(attemptId: string) {
     return { attemptId };
   });
 }
+
+export async function reportFullscreenExitAction(attemptId: string) {
+  return runStudentAction(async (studentId) => {
+    await service.recordFullscreenExit(db(), studentId, idSchema.parse(attemptId));
+    return { attemptId };
+  });
+}

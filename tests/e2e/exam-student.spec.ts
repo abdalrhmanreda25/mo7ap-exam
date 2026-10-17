@@ -21,6 +21,7 @@ test.describe("Student exam flow with timer", () => {
     await page.getByRole("link", { name: /اختبار سريع E2E/ }).click();
     await page.getByRole("button", { name: "ابدأ الامتحان" }).click();
     await expect(page).toHaveURL(/\/attempts\/[A-Za-z0-9_-]+$/);
+    await expect(page.getByRole("button", { name: "ملء الشاشة" })).toBeVisible();
 
     const timer = page.getByRole("timer");
     await expect(timer).toBeVisible();
