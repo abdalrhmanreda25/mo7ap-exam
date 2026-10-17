@@ -4,5 +4,6 @@ export const TEST_PASSWORD = "Emulator-only-1234";
 export const ACCOUNTS = {
   student: { email: "student-e2e@example.test", name: "طالب تجريبي", role: "STUDENT" },
   admin: { email: "admin-e2e@example.test", name: "مشرف تجريبي", role: "ADMIN" },
+  monitor: { email: "monitor-e2e@example.test", name: "طالب المراقبة", role: "STUDENT" },
   disabled: { email: "disabled-e2e@example.test", name: "حساب موقوف", role: "STUDENT" },
 } as const;

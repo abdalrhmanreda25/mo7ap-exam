@@ -8,6 +8,7 @@ const ITEMS = [
   { href: "/admin/subjects", label: "المواد والمنهج" },
   { href: "/admin/questions", label: "بنك الأسئلة" },
   { href: "/admin/exams", label: "الامتحانات" },
+  { href: "/admin/monitor", label: "المراقبة" },
 ];
 
 export function AdminNav() {

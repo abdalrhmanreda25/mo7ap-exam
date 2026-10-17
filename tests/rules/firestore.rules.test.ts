@@ -444,3 +444,42 @@ describe("admin: attempts and results are never written from the client", () => 
     await assertFails(updateDoc(doc(admin, "attempts", "e_pub__stu1"), { score: 2, status: "GRADED" }));
   });
 });
+
+describe("camera signaling (monitorSessions)", () => {
+  const offer = { type: "offer", sdp: "v=0" };
+  const answer = { type: "answer", sdp: "v=0" };
+
+  it("student creates a live session only for their own attempt", async () => {
+    const db = asUser(STUDENT, "STUDENT");
+    await assertSucceeds(setDoc(doc(db, "monitorSessions", "e2e-exam__stu1"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(db, "monitorSessions", "forged"), { studentId: OTHER_STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(db, "monitorSessions", "forged2"), { studentId: STUDENT, offer, answer, status: "live", updatedAt: serverTimestamp() }));
+  });
+
+  it("only the admin writes the answer; the student cannot forge one", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "monitorSessions", "s1"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
+    });
+    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s1"), { answer, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s1"), { answer, updatedAt: serverTimestamp() }));
+  });
+
+  it("student and admin read the session; other students cannot", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "monitorSessions", "s2"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
+    });
+    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s2")));
+    await assertSucceeds(getDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s2")));
+    await assertFails(getDoc(doc(asUser(OTHER_STUDENT, "STUDENT"), "monitorSessions", "s2")));
+  });
+
+  it("nobody can delete a session, and the admin cannot create an offer", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "monitorSessions", "s3"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
+    });
+    await assertFails(deleteDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s3")));
+    await assertFails(deleteDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s3")));
+    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s4"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
+  });
+});
+

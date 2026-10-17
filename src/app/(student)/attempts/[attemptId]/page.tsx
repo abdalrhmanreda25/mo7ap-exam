@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/session";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { getAttemptView } from "@/features/attempts/service";
 import { ExamPlayer } from "@/features/attempts/components/exam-player";
+import { CameraGate } from "@/features/monitor/components/camera-gate";
 
 export const metadata: Metadata = { title: "الامتحان" };
 
@@ -24,5 +25,12 @@ async function AttemptContent({ params }: { params: Promise<{ attemptId: string 
   const user = await requireRole("STUDENT");
   const view = await getAttemptView(getAdminDb(), user.uid, attemptId);
   if (!view) notFound();
-  return <ExamPlayer view={view} />;
+
+  // Camera is required only while the attempt is active. Results are shown without it.
+  if (view.status !== "IN_PROGRESS") return <ExamPlayer view={view} />;
+  return (
+    <CameraGate attemptId={view.attemptId} studentId={user.uid}>
+      <ExamPlayer view={view} />
+    </CameraGate>
+  );
 }

@@ -348,6 +348,45 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ---------- camera monitoring signaling (no media is stored) ----------
+    // The student publishes an SDP offer and ICE candidates for their own attempt.
+    // The admin answers. Neither side can change the other's fields, and nobody can delete.
+
+    function ownsMonitorSession(sessionId) {
+      return isStudent() && get(/databases/$(database)/documents/monitorSessions/$(sessionId)).data.studentId == request.auth.uid;
+    }
+
+    match /monitorSessions/{attemptId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == request.auth.uid);
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['studentId', 'offer', 'answer', 'status', 'updatedAt'])
+        && request.resource.data.answer == null
+        && request.resource.data.status == 'live';
+
+      allow update: if (isStudent() && resource.data.studentId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['offer', 'answer', 'status', 'updatedAt'])
+            && request.resource.data.answer == null)
+        || (isAdmin()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'updatedAt'])
+            && resource.data.offer != null);
+
+      allow delete: if false;
+
+      match /studentCandidates/{candidateId} {
+        allow read: if isAdmin() || ownsMonitorSession(attemptId);
+        allow create: if ownsMonitorSession(attemptId);
+        allow update, delete: if false;
+      }
+
+      match /adminCandidates/{candidateId} {
+        allow read: if isAdmin() || ownsMonitorSession(attemptId);
+        allow create: if isAdmin();
+        allow update, delete: if false;
+      }
+    }
+
     // ---------- default deny ----------
 
     match /{document=**} {
