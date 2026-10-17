@@ -54,4 +54,17 @@ test.describe("Excel/CSV import on the subjects page", () => {
     expect(response.status()).toBe(200);
     expect(await response.text()).toContain("nameAr,slug");
   });
+
+  test("exam Excel template: admin gets an xlsx, student gets 403", async ({ page, request, baseURL }) => {
+    await signInAsAdmin(page);
+    const admin = await request.get(`${baseURL}/api/templates/exam-questions?examId=e2e-exam`, {
+      headers: { cookie: (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join("; ") },
+    });
+    expect(admin.status()).toBe(200);
+    expect(admin.headers()["content-type"]).toContain("spreadsheetml");
+    expect((await admin.body()).subarray(0, 2).toString()).toBe("PK");
+
+    const anon = await request.get(`${baseURL}/api/templates/exam-questions?examId=e2e-exam`);
+    expect(anon.status()).toBe(403);
+  });
 });

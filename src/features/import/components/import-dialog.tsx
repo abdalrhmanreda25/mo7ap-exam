@@ -95,7 +95,7 @@ export function ImportDialog({ kind, examId }: { kind: ImportKind; examId?: stri
           </div>
 
           <Link
-            href={`/templates/${template.file}`}
+            href={kind === "examQuestions" && examId ? `/api/templates/exam-questions?examId=${examId}` : `/templates/${template.file}`}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
             download
           >
