@@ -96,10 +96,18 @@ function startBroadcast(attemptId: string, studentId: string, stream: MediaStrea
   const sessionRef = doc(db, SESSION_COLLECTION, attemptId);
   const unsubs: (() => void)[] = [];
   let closed = false;
+  // Candidates can appear before the session document exists. Rules need the document, so hold them until it does.
+  let sessionReady = false;
+  const pending: RTCIceCandidate[] = [];
 
+  const send = (candidate: RTCIceCandidate) => {
+    addDoc(collection(sessionRef, "studentCandidates"), candidate.toJSON()).catch(() => undefined);
+  };
   stream.getTracks().forEach((track) => pc.addTrack(track, stream));
   pc.onicecandidate = (event) => {
-    if (event.candidate && !closed) void addDoc(collection(sessionRef, "studentCandidates"), event.candidate.toJSON());
+    if (!event.candidate || closed) return;
+    if (sessionReady) send(event.candidate);
+    else pending.push(event.candidate);
   };
 
   void (async () => {
@@ -111,21 +119,27 @@ function startBroadcast(attemptId: string, studentId: string, stream: MediaStrea
     } else {
       await setDoc(sessionRef, { studentId, ...payload });
     }
+    sessionReady = true;
+    pending.splice(0).forEach(send);
 
     unsubs.push(
       onSnapshot(sessionRef, (snap) => {
         const answer = snap.data()?.answer;
-        if (answer && !pc.currentRemoteDescription && !closed) void pc.setRemoteDescription(answer);
+        if (answer && pc.signalingState === "have-local-offer" && !closed) {
+          void pc.setRemoteDescription(answer).catch(() => undefined);
+        }
       }),
     );
     unsubs.push(
       onSnapshot(collection(sessionRef, "adminCandidates"), (snap) => {
         snap.docChanges().forEach((change) => {
-          if (change.type === "added" && !closed) void pc.addIceCandidate(change.doc.data());
+          if (change.type === "added" && !closed) {
+            pc.addIceCandidate(change.doc.data()).catch(() => undefined);
+          }
         });
       }),
     );
-  })();
+  })().catch(() => undefined);
 
   return () => {
     closed = true;

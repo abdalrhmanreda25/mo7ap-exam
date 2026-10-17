@@ -1,12 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { QuestionPreview } from "@/features/questions/components/question-preview";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { CheckCircle2, ChevronLeft, ChevronRight, Clock, CloudOff, Loader2, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/feedback/confirm-action";
 import { Button } from "@/components/ui/button";
-import { QuestionPreview } from "@/features/questions/components/question-preview";
 import { reportResult } from "@/lib/client/result";
 import { saveAnswerAction, submitAttemptAction } from "../actions";
 import { formatRemaining } from "../time";
@@ -147,12 +147,11 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
             </h2>
             <span>{current.points} درجة</span>
           </div>
-          <QuestionPreview
-            statementAr={current.statementAr}
-            statement={current.statement}
-            options={current.options}
-            correctIndex={null}
-          />
+          <div className="rounded-2xl border border-border bg-card p-5" dir="rtl" lang="ar">
+            <p className="text-base font-medium leading-loose text-foreground">
+              <bdi>{current.statementAr.trim() || current.statement}</bdi>
+            </p>
+          </div>
           <fieldset className="space-y-2">
             <legend className="sr-only">اختر الإجابة</legend>
             {current.options.map((option, optionIndex) => {

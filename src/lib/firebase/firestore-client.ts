@@ -1,10 +1,19 @@
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { connectFirestoreEmulator, getFirestore, type Firestore } from "firebase/firestore";
 import { getClientApp } from "./client";
+import { shouldUseAuthEmulator } from "./config";
 
 let cached: Firestore | null = null;
 
-/** Browser Firestore for live signaling only. Rules restrict it to the student's own session and the admin. */
+/**
+ * Browser Firestore for live signaling only. Rules restrict it to the student's own session and the admin.
+ * With NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true it must talk to the emulator, never the real project.
+ */
 export function getClientDb(): Firestore {
-  if (!cached) cached = getFirestore(getClientApp());
-  return cached;
+  if (cached) return cached;
+  const db = getFirestore(getClientApp());
+  if (shouldUseAuthEmulator()) {
+    connectFirestoreEmulator(db, "127.0.0.1", 8181);
+  }
+  cached = db;
+  return db;
 }
