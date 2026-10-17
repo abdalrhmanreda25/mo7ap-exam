@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { addDoc, collection, doc, onSnapshot, serverTimestamp, updateDoc, type DocumentData } from "firebase/firestore";
 import { getClientDb } from "@/lib/firebase/firestore-client";
+import { getClientAuth } from "@/lib/firebase/client";
 import { RTC_CONFIG, SESSION_COLLECTION } from "../rtc";
 import { StatusBadge } from "@/components/layout/page-header";
 
@@ -22,27 +23,49 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
   const [status, setStatus] = useState<Status>("waiting");
   const [error, setError] = useState<string | null>(null);
 
-  // Watch the session document.
+  // Watch the session document. Refresh the ID token first: the rules need the role claim,
+  // and a token issued before the claim was set would be denied.
   useEffect(() => {
-    const sessionRef = doc(getClientDb(), SESSION_COLLECTION, attemptId);
-    return onSnapshot(
-      sessionRef,
-      (snap) => {
-        const data: DocumentData | undefined = snap.data();
-        if (!data) return;
-        if (data.status === "ended") {
-          setStatus("ended");
-          setOffer(null);
-          return;
-        }
-        if (data.offer) setStatus((prev) => (prev === "live" ? prev : "connecting"));
-        setOffer(data.offer ?? null);
-      },
-      (err) => {
-        setStatus("error");
-        setError(`تعذر قراءة الجلسة: ${err.code}`);
-      },
-    );
+    let cancelled = false;
+    let unsub: (() => void) | undefined;
+    const attach = (sessionRef: ReturnType<typeof doc>) =>
+      onSnapshot(
+        sessionRef,
+        (snap) => {
+          const data: DocumentData | undefined = snap.data();
+          if (!data) return;
+          if (data.status === "ended") {
+            setStatus("ended");
+            setOffer(null);
+            return;
+          }
+          if (data.offer) setStatus((prev) => (prev === "live" ? prev : "connecting"));
+          setOffer(data.offer ?? null);
+        },
+        (err) => {
+          setStatus("error");
+          setError(
+            err.code === "permission-denied"
+              ? "لا تملك صلاحية مشاهدة هذه الجلسة. سجّل الخروج ثم الدخول من جديد بحساب المشرف."
+              : `تعذر قراءة الجلسة: ${err.code}`,
+          );
+        },
+      );
+
+    void (async () => {
+      const user = getClientAuth().currentUser;
+      if (user) await user.getIdToken(true);
+      if (cancelled) return;
+      unsub = attach(doc(getClientDb(), SESSION_COLLECTION, attemptId));
+    })().catch((err: { code?: string }) => {
+      setStatus("error");
+      setError(`تعذر تحديث صلاحية الدخول: ${err.code ?? "unknown"}`);
+    });
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [attemptId]);
 
   // Answer each new offer.
