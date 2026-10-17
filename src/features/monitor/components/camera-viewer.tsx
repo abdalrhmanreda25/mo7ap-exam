@@ -53,8 +53,18 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
       );
 
     void (async () => {
-      const user = getClientAuth().currentUser;
-      if (user) await user.getIdToken(true);
+      // Wait for Firebase to restore the browser login. Subscribing earlier sends an unauthenticated read.
+      const auth = getClientAuth();
+      await auth.authStateReady();
+      const user = auth.currentUser;
+      if (!user) {
+        if (!cancelled) {
+          setStatus("error");
+          setError("انتهت جلسة الدخول في هذا المتصفح. سجّل الخروج ثم الدخول من جديد.");
+        }
+        return;
+      }
+      await user.getIdToken(true);
       if (cancelled) return;
       unsub = attach(doc(getClientDb(), SESSION_COLLECTION, attemptId));
     })().catch((err: { code?: string }) => {

@@ -5,6 +5,7 @@ import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc, u
 import { CameraOff, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getClientDb } from "@/lib/firebase/firestore-client";
+import { getClientAuth } from "@/lib/firebase/client";
 import { RTC_CONFIG, SESSION_COLLECTION } from "../rtc";
 
 type GateState = "asking" | "live" | "blocked";
@@ -111,6 +112,8 @@ function startBroadcast(attemptId: string, studentId: string, stream: MediaStrea
   };
 
   void (async () => {
+    // Firestore writes must carry the restored login; wait for it before signaling.
+    await getClientAuth().authStateReady();
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     const payload = { offer: { type: offer.type, sdp: offer.sdp }, answer: null, status: "live", updatedAt: serverTimestamp() };
