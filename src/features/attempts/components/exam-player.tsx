@@ -13,6 +13,7 @@ import { saveAnswerAction, submitAttemptAction } from "../actions";
 import { formatRemaining } from "../time";
 import { FullscreenControl } from "./fullscreen-control";
 import type { AttemptView } from "../service";
+import { MixedText } from "@/components/feedback/mixed-text";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -150,7 +151,7 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
           </div>
           <div className="rounded-2xl border border-border bg-card p-5" dir="rtl" lang="ar">
             <p className="text-base font-medium leading-loose text-foreground">
-              <bdi>{current.statementAr.trim() || current.statement}</bdi>
+              <MixedText text={current.statementAr.trim() || current.statement} />
             </p>
             {current.mediaReferences.length > 0 && (
               <div className="mt-4">
@@ -181,7 +182,7 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
                     {"أبجدهوز"[optionIndex] ?? optionIndex + 1}
                   </span>
-                  <bdi className="flex-1">{option.textAr.trim() || option.text}</bdi>
+                  <MixedText className="flex-1" text={option.textAr.trim() || option.text} />
                 </label>
               );
             })}

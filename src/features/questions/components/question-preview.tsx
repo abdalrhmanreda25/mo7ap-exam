@@ -1,4 +1,5 @@
 import { QuestionMedia } from "@/components/feedback/question-media";
+import { MixedText } from "@/components/feedback/mixed-text";
 
 const ARABIC_LETTERS = ["أ", "ب", "ج", "د", "هـ", "و"];
 
@@ -26,7 +27,7 @@ export function QuestionPreview({
   return (
     <div className="space-y-4 rounded-2xl border border-border bg-card p-5" dir="rtl" lang="ar">
       <p className="text-base font-medium leading-loose text-foreground">
-        <bdi>{hasArabic ? statementAr : statement || "نص السؤال..."}</bdi>
+        <MixedText text={hasArabic ? statementAr : statement || "نص السؤال..."} />
       </p>
       <QuestionMedia urls={media} />
       <ol className="space-y-2">
@@ -42,7 +43,7 @@ export function QuestionPreview({
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
                 {ARABIC_LETTERS[index] ?? index + 1}
               </span>
-              <bdi className="flex-1">{option.textAr.trim() || option.text || "الخيار"}</bdi>
+              <MixedText className="flex-1" text={option.textAr.trim() || option.text || "الخيار"} />
               {isCorrect && <span className="text-xs font-medium text-success">الإجابة الصحيحة</span>}
             </li>
           );
@@ -51,7 +52,7 @@ export function QuestionPreview({
       {explanationAr && explanationAr.trim() && (
         <div className="rounded-xl bg-muted/60 p-4 text-sm leading-relaxed">
           <p className="mb-1 font-bold">الشرح</p>
-          <bdi>{explanationAr}</bdi>
+          <MixedText text={explanationAr} />
         </div>
       )}
     </div>

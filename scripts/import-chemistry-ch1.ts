@@ -1,9 +1,10 @@
 /**
- * Loads content/chemistry-ch1-medium.json into the subject "chemistry":
- * chapter, lessons, questions (READY, MEDIUM), and a published exam.
+ * Loads a chapter-1 content file into the subject "chemistry":
+ * chapter, lessons, questions (READY, difficulty from exam.difficulty), and a published exam.
  * Idempotent: reuses chapter, lessons, and questions with the same text; skips the exam if the title exists.
+ * Existing questions get their lesson and images synced; neither is locked content.
  *
- *   npx tsx --conditions=react-server scripts/import-chemistry-ch1.ts
+ *   npx tsx --conditions=react-server scripts/import-chemistry-ch1.ts [content/chemistry-ch1-medium.json]
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -14,7 +15,9 @@ import * as exams from "../src/features/exams/service";
 import { COLLECTIONS } from "../src/types/firestore";
 
 const ACTOR = "content-import-chemistry-ch1";
-const data = JSON.parse(readFileSync(path.resolve("content/chemistry-ch1-medium.json"), "utf8"));
+const contentFile = process.argv[2] ?? "content/chemistry-ch1-medium.json";
+const data = JSON.parse(readFileSync(path.resolve(contentFile), "utf8"));
+const difficulty: "EASY" | "MEDIUM" | "HARD" = data.exam.difficulty ?? "MEDIUM";
 const LETTERS = ["o1", "o2", "o3", "o4", "o5", "o6"];
 
 async function main() {
@@ -52,18 +55,20 @@ async function main() {
   for (const q of data.questions) {
     const existing = bank.find((b) => b.statementAr === q.q && b.chapterId === chapterId);
     if (existing) {
-      // Images are not locked content, so they can be added even after the question is used in a published exam.
+      // Images and lesson are not locked content, so they can change even after the question is used in a published exam.
       const wanted: string[] = q.media ?? [];
+      const wantedLesson = lessonIdByKey.get(q.lesson)!;
       const detail = await questions.getQuestionDetail(db, existing.id);
-      if (detail && JSON.stringify(detail.mediaReferences) !== JSON.stringify(wanted) && wanted.length > 0) {
+      const mediaChanged = detail && wanted.length > 0 && JSON.stringify(detail.mediaReferences) !== JSON.stringify(wanted);
+      if (detail && (mediaChanged || detail.lessonId !== wantedLesson)) {
         await questions.updateQuestion(db, ACTOR, existing.id, {
           subjectId: detail.subjectId,
           chapterId: detail.chapterId,
-          lessonId: detail.lessonId,
+          lessonId: wantedLesson,
           type: detail.type,
           statement: detail.statement,
           statementAr: detail.statementAr,
-          mediaReferences: wanted,
+          mediaReferences: mediaChanged ? wanted : detail.mediaReferences,
           difficulty: detail.difficulty,
           explanation: detail.explanation,
           explanationAr: detail.explanationAr,
@@ -71,7 +76,7 @@ async function main() {
           options: detail.options,
           correctOptionId: detail.correctOptionId,
         });
-        console.log("media updated", existing.id, wanted.join(","));
+        console.log("question updated", existing.id);
       }
       questionIds.push(existing.id);
       continue;
@@ -85,7 +90,7 @@ async function main() {
       statement: q.q,
       statementAr: q.q,
       mediaReferences: q.media ?? [],
-      difficulty: "MEDIUM",
+      difficulty,
       explanation: "",
       explanationAr: "",
       status: "READY",
@@ -111,7 +116,7 @@ async function main() {
   const examId = await exams.createDraftExam(db, ACTOR, {
     title: data.exam.title,
     titleAr: data.exam.titleAr,
-    description: "امتحان متوسط المستوى على الباب الأول فقط.",
+    description: data.exam.descriptionAr ?? "امتحان متوسط المستوى على الباب الأول فقط.",
     subjectId,
     chapterIds: [chapterId],
     lessonIds: [],

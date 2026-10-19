@@ -13,6 +13,7 @@ import { listQuestions, questionExamUsage } from "@/features/questions/service";
 import { DIFFICULTY_AR, QUESTION_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { QUESTION_STATUSES } from "@/types/firestore";
 import { ImportDialog } from "@/features/import/components/import-dialog";
+import { MixedText } from "@/components/feedback/mixed-text";
 
 export const metadata: Metadata = { title: "بنك الأسئلة" };
 
@@ -102,7 +103,7 @@ async function QuestionsContent({
                 <Link href={`/admin/questions/${q.id}`} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:bg-muted/40">
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="truncate font-medium">
-                      <bdi>{q.statementAr || q.statement}</bdi>
+                      <MixedText text={q.statementAr || q.statement} />
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {subjectName.get(q.subjectId) ?? "—"} · {QUESTION_TYPE_AR[q.type]} · {DIFFICULTY_AR[q.difficulty]}

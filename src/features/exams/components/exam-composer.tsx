@@ -9,6 +9,7 @@ import { inputClass } from "@/components/forms/styles";
 import { QuestionPreview } from "@/features/questions/components/question-preview";
 import { reportResult } from "@/lib/client/result";
 import type { ActionResult } from "@/lib/server/action-result";
+import { MixedText } from "@/components/feedback/mixed-text";
 import {
   addExamQuestionAction,
   archiveExamAction,
@@ -145,7 +146,7 @@ export function ExamComposer({
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="text-sm font-medium">
                     <span className="text-muted-foreground">{index + 1}. </span>
-                    <bdi>{item.statementAr || item.statement}</bdi>
+                    <MixedText text={item.statementAr || item.statement} />
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {item.type === "TRUE_FALSE" ? "صح أو خطأ" : "اختيار من متعدد"} · {item.options.length} خيارات
