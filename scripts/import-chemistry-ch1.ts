@@ -52,6 +52,27 @@ async function main() {
   for (const q of data.questions) {
     const existing = bank.find((b) => b.statementAr === q.q && b.chapterId === chapterId);
     if (existing) {
+      // Images are not locked content, so they can be added even after the question is used in a published exam.
+      const wanted: string[] = q.media ?? [];
+      const detail = await questions.getQuestionDetail(db, existing.id);
+      if (detail && JSON.stringify(detail.mediaReferences) !== JSON.stringify(wanted) && wanted.length > 0) {
+        await questions.updateQuestion(db, ACTOR, existing.id, {
+          subjectId: detail.subjectId,
+          chapterId: detail.chapterId,
+          lessonId: detail.lessonId,
+          type: detail.type,
+          statement: detail.statement,
+          statementAr: detail.statementAr,
+          mediaReferences: wanted,
+          difficulty: detail.difficulty,
+          explanation: detail.explanation,
+          explanationAr: detail.explanationAr,
+          status: detail.status,
+          options: detail.options,
+          correctOptionId: detail.correctOptionId,
+        });
+        console.log("media updated", existing.id, wanted.join(","));
+      }
       questionIds.push(existing.id);
       continue;
     }
@@ -63,7 +84,7 @@ async function main() {
       type: "SINGLE_CHOICE",
       statement: q.q,
       statementAr: q.q,
-      mediaReferences: [],
+      mediaReferences: q.media ?? [],
       difficulty: "MEDIUM",
       explanation: "",
       explanationAr: "",

@@ -13,6 +13,7 @@ import { CONTENT_FIELD_LABELS } from "../content-lock";
 import { createQuestionAction, updateQuestionAction } from "../actions";
 import type { QuestionDetail } from "../service";
 import { QuestionPreview } from "./question-preview";
+import { MediaUploadButton } from "./media-upload-button";
 
 export interface Catalog {
   subjects: { id: string; nameAr: string }[];
@@ -262,9 +263,15 @@ export function QuestionForm({ catalog, question }: { catalog: Catalog; question
           <Field id="statement" label="نص السؤال بالإنجليزية" error={errors.statement?.message} hint="مطلوب. يُستخدم عند عدم وجود نص عربي.">
             <textarea id="statement" dir="ltr" className={textareaClass} disabled={locked} aria-invalid={Boolean(errors.statement)} {...register("statement")} />
           </Field>
-          <Field id="mediaText" label="روابط الوسائط" hint="رابط واحد في كل سطر. اختياري.">
+          <Field id="mediaText" label="صور وأشكال السؤال" hint="ارفع صورة، أو اكتب رابطًا واحدًا في كل سطر. تظهر للطالب مع نص السؤال.">
             <textarea id="mediaText" dir="ltr" className={textareaClass} {...register("mediaText")} />
           </Field>
+          <MediaUploadButton
+            onUploaded={(url) => {
+              const current = getValues("mediaText").trim();
+              setValue("mediaText", current ? `${current}\n${url}` : url, { shouldDirty: true });
+            }}
+          />
         </FormSection>
 
         <FormSection title="الخيارات والإجابة الصحيحة" description="حدد الخيار الصحيح بالدائرة بجانبه. الإجابة الصحيحة لا تظهر للطالب أبدًا.">
@@ -360,6 +367,7 @@ export function QuestionForm({ catalog, question }: { catalog: Catalog; question
           options={previewOptions}
           correctIndex={null}
           explanationAr={undefined}
+          media={(watched.mediaText ?? "").split("\n").map((l) => l.trim()).filter(Boolean)}
         />
         <p className="text-xs text-muted-foreground">هذه المعاينة لا تُظهر الإجابة الصحيحة، ولا يراها الطلاب قبل التسليم.</p>
       </aside>

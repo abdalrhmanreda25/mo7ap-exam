@@ -79,3 +79,20 @@ export async function deleteExamAction(examId: string) {
     return { id: examId };
   });
 }
+
+const policySchema = z.object({
+  showScoreAfterSubmit: z.boolean(),
+  showCorrectAnswersAfterSubmit: z.boolean(),
+  showExplanationsAfterSubmit: z.boolean(),
+});
+
+export async function updateReviewPolicyAction(examId: string, policy: unknown) {
+  return runAdminAction(async (actor) => {
+    await service.updateReviewPolicy(db(), actor, idSchema.parse(examId), policySchema.parse(policy));
+    return { id: examId };
+  });
+}
+
+export async function cloneExamAction(examId: string) {
+  return runAdminAction(async (actor) => service.cloneExam(db(), actor, idSchema.parse(examId)));
+}

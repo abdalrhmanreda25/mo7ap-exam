@@ -28,6 +28,8 @@ export interface ComposedItem {
   type: string;
   options: { id: string; text: string; textAr: string }[];
   hasKey: boolean;
+  correctOptionId: string | null;
+  mediaReferences: string[];
 }
 
 export interface PoolItem {
@@ -58,6 +60,7 @@ export function ExamComposer({
   const [pending, startTransition] = useTransition();
   const [pickId, setPickId] = useState("");
   const [pickPoints, setPickPoints] = useState(1);
+  const [showAnswers, setShowAnswers] = useState(true);
   const isDraft = status === "DRAFT";
 
   const run = (task: () => Promise<ActionResult<unknown>>, success: string) =>
@@ -245,7 +248,11 @@ export function ExamComposer({
         )}
       </FormSection>
 
-      <FormSection title="معاينة كما يراها الطالب" description="بدون الإجابات الصحيحة. الخلط يتم عند بدء الامتحان.">
+      <FormSection title="معاينة الامتحان" description="الخلط يتم عند بدء الامتحان. الإجابات الصحيحة تظهر لك فقط.">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" className="size-4 accent-primary" checked={showAnswers} onChange={(e) => setShowAnswers(e.target.checked)} />
+          إظهار الإجابات الصحيحة في المعاينة
+        </label>
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground">أضف أسئلة لتظهر المعاينة.</p>
         ) : (
@@ -257,7 +264,8 @@ export function ExamComposer({
                   statementAr={item.statementAr}
                   statement={item.statement}
                   options={item.options.map((o) => ({ id: o.id, text: o.text, textAr: o.textAr }))}
-                  correctIndex={null}
+                  correctIndex={showAnswers ? item.options.findIndex((o) => o.id === item.correctOptionId) : null}
+                  media={item.mediaReferences}
                 />
               </div>
             ))}

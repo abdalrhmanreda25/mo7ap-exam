@@ -513,3 +513,66 @@ export async function countExamAttempts(db: Firestore, examId: string): Promise<
   const snap = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).count().get();
   return snap.data().count;
 }
+
+export interface ReviewPolicy {
+  showScoreAfterSubmit: boolean;
+  showCorrectAnswersAfterSubmit: boolean;
+  showExplanationsAfterSubmit: boolean;
+}
+
+/**
+ * What students see after submitting. Safe to change on a published or closed exam: it never
+ * touches questions, keys, or scores. Applies to past and future attempts when they view results.
+ */
+export async function updateReviewPolicy(db: Firestore, actorUid: string, examId: string, policy: ReviewPolicy) {
+  const examRef = db.collection(COLLECTIONS.exams).doc(examId);
+  const snap = await examRef.get();
+  if (!snap.exists) throw new DomainError("الامتحان غير موجود.");
+  const audit = auditLogWrite(db, actorUid, {
+    action: "EXAM_REVIEW_POLICY_UPDATED",
+    targetType: "exam",
+    targetId: examId,
+    metadata: { ...policy },
+  });
+  const batch = db.batch();
+  batch.update(examRef, { ...policy, updatedAt: FieldValue.serverTimestamp() });
+  batch.set(audit.ref, audit.data);
+  await batch.commit();
+}
+
+/**
+ * Starts a new editable version of an exam: a DRAFT with the same settings and questions,
+ * snapshots refreshed from the bank (so bank fixes such as added images are picked up).
+ * The original stays untouched with its attempts and results.
+ */
+export async function cloneExam(db: Firestore, actorUid: string, examId: string): Promise<{ id: string; skipped: number }> {
+  const source = await getExam(db, examId);
+  if (!source) throw new DomainError("الامتحان غير موجود.");
+  const items = await getExamComposition(db, examId);
+
+  const newId = await createDraftExam(db, actorUid, {
+    title: source.title,
+    titleAr: `${source.titleAr} (نسخة جديدة)`,
+    description: source.description,
+    subjectId: source.subjectId,
+    chapterIds: source.chapterIds,
+    lessonIds: source.lessonIds,
+    academicYear: source.academicYear,
+    durationSeconds: source.durationSeconds,
+    shuffleQuestions: source.shuffleQuestions,
+    shuffleOptions: source.shuffleOptions,
+    showScoreAfterSubmit: source.showScoreAfterSubmit,
+    showCorrectAnswersAfterSubmit: source.showCorrectAnswersAfterSubmit,
+    showExplanationsAfterSubmit: source.showExplanationsAfterSubmit,
+  });
+
+  let skipped = 0;
+  for (const item of items) {
+    try {
+      await addQuestionToExam(db, actorUid, newId, item.questionId, item.points);
+    } catch {
+      skipped++; // archived or deleted bank question
+    }
+  }
+  return { id: newId, skipped };
+}

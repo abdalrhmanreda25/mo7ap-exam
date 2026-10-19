@@ -112,7 +112,10 @@
         "شديدة الصلابة",
         "غير قابلة للتشكيل"
       ],
-      "correct": 3
+      "correct": 3,
+      "media": [
+        "/figures/chem-ch1/q7.png"
+      ]
     },
     {
       "lesson": "L2",
@@ -167,7 +170,10 @@
         "يشبه الكربون فى مظهره",
         "قابل للتمغنط"
       ],
-      "correct": 4
+      "correct": 4,
+      "media": [
+        "/figures/chem-ch1/q12.png"
+      ]
     },
     {
       "lesson": "L3",
@@ -200,7 +206,10 @@
         "(4) , (3)",
         "(4) , (2)"
       ],
-      "correct": 4
+      "correct": 4,
+      "media": [
+        "/figures/chem-ch1/q15.png"
+      ]
     },
     {
       "lesson": "L3",
@@ -365,7 +374,10 @@
         "Y",
         "Z"
       ],
-      "correct": 3
+      "correct": 3,
+      "media": [
+        "/figures/chem-ch1/q36.png"
+      ]
     },
     {
       "lesson": "L2",

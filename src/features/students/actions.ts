@@ -25,3 +25,28 @@ export async function setStudentActiveAction(uid: string, active: boolean) {
     return { uid, active };
   });
 }
+
+const updateSchema = z.object({
+  displayName: z.string().trim().min(1, { error: "الاسم مطلوب." }).max(120),
+  email: z.string().trim().pipe(z.email({ error: "بريد غير صالح." })),
+  password: z.string().max(128).optional().refine((v) => !v || v.length >= 6, { error: "كلمة المرور 6 أحرف على الأقل." }),
+});
+
+export async function updateStudentAction(uid: string, input: unknown) {
+  return runAdminAction(async (actor) => {
+    const parsed = updateSchema.parse(input);
+    await service.updateStudent(db(), actor, idSchema.parse(uid), { ...parsed, password: parsed.password || undefined });
+    return { uid };
+  });
+}
+
+export async function deleteStudentAction(uid: string) {
+  return runAdminAction(async (actor) => {
+    await service.deleteStudent(db(), actor, idSchema.parse(uid));
+    return { uid };
+  });
+}
+
+export async function studentPasswordLinkAction(uid: string) {
+  return runAdminAction(async () => ({ link: await service.studentPasswordLink(db(), idSchema.parse(uid)) }));
+}

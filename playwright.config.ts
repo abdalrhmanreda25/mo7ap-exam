@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Run via `npm run test:e2e`, which starts the Auth + Firestore emulators first.
-const PORT = 3100;
+const PORT = Number(process.env.E2E_PORT ?? 3100);
 
 export default defineConfig({
   testDir: "tests/e2e",

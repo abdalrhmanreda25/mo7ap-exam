@@ -1,3 +1,5 @@
+import { QuestionMedia } from "@/components/feedback/question-media";
+
 const ARABIC_LETTERS = ["أ", "ب", "ج", "د", "هـ", "و"];
 
 /**
@@ -11,12 +13,14 @@ export function QuestionPreview({
   options,
   correctIndex,
   explanationAr,
+  media = [],
 }: {
   statementAr: string;
   statement: string;
   options: { id: string; textAr: string; text: string }[];
   correctIndex?: number | null;
   explanationAr?: string;
+  media?: string[];
 }) {
   const hasArabic = statementAr.trim().length > 0;
   return (
@@ -24,6 +28,7 @@ export function QuestionPreview({
       <p className="text-base font-medium leading-loose text-foreground">
         <bdi>{hasArabic ? statementAr : statement || "نص السؤال..."}</bdi>
       </p>
+      <QuestionMedia urls={media} />
       <ol className="space-y-2">
         {options.map((option, index) => {
           const isCorrect = correctIndex === index;

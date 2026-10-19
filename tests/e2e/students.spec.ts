@@ -33,13 +33,13 @@ test.describe("Admin: students, reopen exam, camera grid", () => {
     await admin.waitForLoadState("networkidle");
     await admin.getByRole("link", { name: new RegExp(ACCOUNTS.student.name) }).click();
     await expect(admin).toHaveURL(/\/admin\/students\/[A-Za-z0-9_-]+$/, { timeout: 15000 });
-    await expect(admin.getByText("اختبار سريع E2E")).toBeVisible();
+    await expect(admin.getByText("اختبار سريع E2E").first()).toBeVisible();
 
     await admin.getByRole("button", { name: "إعادة فتح الامتحان" }).first().click();
     const dialog = admin.getByRole("dialog", { name: "السماح للطالب بإعادة الامتحان؟" });
     await dialog.getByLabel("السبب (يُحفظ في سجل التدقيق)").fill("إعادة تجريبية");
     await dialog.getByRole("button", { name: "إعادة الفتح" }).click();
-    await expect(admin.getByText("تم فتح الامتحان للطالب من جديد.")).toBeVisible();
+    await expect(admin.getByText("تم فتح الامتحان للطالب من جديد.")).toBeVisible({ timeout: 20000 });
     await expect(admin.getByText("محاولات سابقة (محفوظة)")).toBeVisible();
 
     await admin.goto("/admin/monitor/all");

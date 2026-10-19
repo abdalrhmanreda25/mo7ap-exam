@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { QuestionPreview } from "@/features/questions/components/question-preview";
+import { QuestionMedia } from "@/components/feedback/question-media";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { CheckCircle2, ChevronLeft, ChevronRight, Clock, CloudOff, Loader2, WifiOff } from "lucide-react";
 import { toast } from "sonner";
@@ -151,6 +152,11 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
             <p className="text-base font-medium leading-loose text-foreground">
               <bdi>{current.statementAr.trim() || current.statement}</bdi>
             </p>
+            {current.mediaReferences.length > 0 && (
+              <div className="mt-4">
+                <QuestionMedia urls={current.mediaReferences} />
+              </div>
+            )}
           </div>
           <fieldset className="space-y-2">
             <legend className="sr-only">اختر الإجابة</legend>
@@ -279,6 +285,7 @@ function ResultPanel({ view, expired }: { view: AttemptView; expired: boolean })
                   options={q.options}
                   correctIndex={correctIndex}
                   explanationAr={result.explanations?.[q.examQuestionId]}
+                  media={q.mediaReferences}
                 />
               </div>
             );

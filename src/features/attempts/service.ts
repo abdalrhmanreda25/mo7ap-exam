@@ -28,6 +28,7 @@ export interface ExamViewQuestion {
   statementAr: string;
   explanation: string;
   explanationAr: string;
+  mediaReferences: string[];
   options: { id: string; text: string; textAr: string }[];
 }
 
@@ -286,6 +287,9 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
       statementAr: snapshot.statementAr,
       explanation: finished && exam.showExplanationsAfterSubmit ? snapshot.explanation : "",
       explanationAr: finished && exam.showExplanationsAfterSubmit ? snapshot.explanationAr : "",
+      mediaReferences: Array.isArray((snapshot as { mediaReferences?: string[] }).mediaReferences)
+        ? (snapshot as { mediaReferences: string[] }).mediaReferences
+        : [],
       options: optionOrders[qid].map((oid) => {
         const o = optionsById.get(oid)!;
         return { id: o.optionId, text: o.text, textAr: o.textAr };

@@ -12,6 +12,8 @@ import { readinessIssues } from "@/features/exams/composition";
 import { countExamAttempts, getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
 import { DeleteExamButton } from "@/features/exams/components/delete-exam-button";
 import { ReopenAllButton } from "@/features/students/components/student-actions";
+import { ReviewPolicyForm } from "@/features/exams/components/review-policy-form";
+import { CloneExamButton } from "@/features/exams/components/clone-exam-button";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 
@@ -48,6 +50,8 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
     type: c.type ? QUESTION_TYPE_AR[c.type] : "",
     options: c.options.map((o) => ({ id: o.id, text: o.text, textAr: o.textAr })),
     hasKey: c.correctOptionId !== null,
+    correctOptionId: c.correctOptionId,
+    mediaReferences: c.bank?.mediaReferences ?? [],
   }));
 
   const attemptCount = await countExamAttempts(db, examId);
@@ -67,6 +71,25 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
         }
       />
       <div className="space-y-10">
+        {exam.status !== "DRAFT" && (
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-5">
+              <div className="space-y-1">
+                <h2 className="text-lg font-bold">تعديل الامتحان</h2>
+                <p className="text-sm text-muted-foreground">الامتحان المنشور مُجمّد حتى لا تتغير نتائج الطلاب. لتعديل الأسئلة أو المدة، أنشئ نسخة جديدة.</p>
+              </div>
+              <CloneExamButton examId={exam.id} />
+            </div>
+            <ReviewPolicyForm
+              examId={exam.id}
+              initial={{
+                showScoreAfterSubmit: exam.showScoreAfterSubmit,
+                showCorrectAnswersAfterSubmit: exam.showCorrectAnswersAfterSubmit,
+                showExplanationsAfterSubmit: exam.showExplanationsAfterSubmit,
+              }}
+            />
+          </section>
+        )}
         <section className="space-y-4">
           <h2 className="text-lg font-bold">إعدادات الامتحان</h2>
           <ExamConfigForm
