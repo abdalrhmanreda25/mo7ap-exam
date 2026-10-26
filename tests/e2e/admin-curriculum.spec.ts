@@ -107,6 +107,12 @@ test.describe("Phase 3: admin builds curriculum, bank, and publishes an exam", (
     await expect(page.getByRole("button", { name: "إضافة", exact: true })).toHaveCount(0);
     await expect(page.locator("#titleAr")).toHaveCount(1);
     await expect(page.locator("#titleAr")).toBeDisabled();
+
+    // Bank list loads and marks the question locked now that a published exam holds it.
+    await page.goto("/admin/questions");
+    const row = page.getByRole("listitem").filter({ hasText: "ما وحدة قياس السرعة" }).first();
+    await expect(row).toBeVisible();
+    await expect(row.getByText("مقفل", { exact: true })).toBeVisible();
   });
 
   test("an empty new exam starts with publish disabled", async ({ page }) => {

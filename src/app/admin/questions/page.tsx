@@ -9,7 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listSubjects } from "@/features/curriculum/service";
-import { listQuestions, questionExamUsage } from "@/features/questions/service";
+import { examUsageByQuestion, listQuestions } from "@/features/questions/service";
 import { DIFFICULTY_AR, QUESTION_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { QUESTION_STATUSES } from "@/types/firestore";
 import { ImportDialog } from "@/features/import/components/import-dialog";
@@ -55,7 +55,7 @@ async function QuestionsContent({
     listQuestions(db, { subjectId: subjectId || undefined, status: statusFilter }),
   ]);
   const subjectName = new Map(subjects.map((s) => [s.id, s.nameAr]));
-  const usage = await Promise.all(questions.map((q) => questionExamUsage(db, q.id)));
+  const usage = await examUsageByQuestion(db);
 
   return (
     <div className="space-y-4">
@@ -96,8 +96,8 @@ async function QuestionsContent({
         />
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-          {questions.map((q, index) => {
-            const locked = usage[index].some((u) => u.examStatus !== "DRAFT");
+          {questions.map((q) => {
+            const locked = (usage.get(q.id) ?? []).some((u) => u.examStatus !== "DRAFT");
             return (
               <li key={q.id}>
                 <Link href={`/admin/questions/${q.id}`} className="flex flex-wrap items-center justify-between gap-3 p-4 transition-colors hover:bg-muted/40">

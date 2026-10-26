@@ -31,20 +31,34 @@ export function optionDocId(questionId: string, clientOptionId: string): string 
   return `${questionId}__${clientOptionId}`;
 }
 
-/** Statuses of every exam that holds this question. Drives content locking. */
-export async function questionExamUsage(
-  db: Firestore,
-  questionId: string,
-): Promise<{ examId: string; examStatus: string }[]> {
-  const usage = await db.collectionGroup("questions").where("questionId", "==", questionId).get();
-  const results: { examId: string; examStatus: string }[] = [];
-  for (const doc of usage.docs) {
-    const examRef = doc.ref.parent.parent;
-    if (!examRef) continue;
-    const exam = await examRef.get();
-    results.push({ examId: examRef.id, examStatus: String(exam.data()?.status ?? "UNKNOWN") });
-  }
-  return results;
+type ExamUsage = { examId: string; examStatus: string };
+
+/**
+ * Statuses of every exam that holds this question. Drives content locking.
+ * An exam question's doc ID is the bank question ID, so this reads one doc per exam
+ * instead of a collection-group query, which needs a dedicated index in production.
+ */
+export async function questionExamUsage(db: Firestore, questionId: string): Promise<ExamUsage[]> {
+  const exams = await db.collection(COLLECTIONS.exams).get();
+  if (exams.empty) return [];
+  const held = await db.getAll(...exams.docs.map((exam) => exam.ref.collection(COLLECTIONS.examQuestions).doc(questionId)));
+  return exams.docs
+    .filter((_, index) => held[index].exists)
+    .map((exam) => ({ examId: exam.id, examStatus: String(exam.data().status ?? "UNKNOWN") }));
+}
+
+/** Exam usage for every question at once: one read of each exam's question list. */
+export async function examUsageByQuestion(db: Firestore): Promise<Map<string, ExamUsage[]>> {
+  const exams = await db.collection(COLLECTIONS.exams).get();
+  const lists = await Promise.all(exams.docs.map((exam) => exam.ref.collection(COLLECTIONS.examQuestions).select().get()));
+  const usage = new Map<string, ExamUsage[]>();
+  exams.docs.forEach((exam, index) => {
+    for (const item of lists[index].docs) {
+      const entry = { examId: exam.id, examStatus: String(exam.data().status ?? "UNKNOWN") };
+      usage.set(item.id, [...(usage.get(item.id) ?? []), entry]);
+    }
+  });
+  return usage;
 }
 
 export async function listQuestions(db: Firestore, filter: { subjectId?: string; status?: QuestionStatus } = {}) {
