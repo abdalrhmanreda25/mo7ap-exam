@@ -104,6 +104,7 @@ async function seed() {
       questionVersion: 1,
     });
     await setDoc(doc(db, "examAnswerKeys", "e_pub", "items", "q1"), { correctOptionId: "o1", points: 2, gradingVersion: 1 });
+    await setDoc(doc(db, "examAccessCodes", "e_pub"), { code: "ABC234", createdBy: "admin", createdAt: now });
 
     const attemptBase = { examId: "e_pub", subjectId: "s1", status: "IN_PROGRESS", startedAt: now, deadlineAt: now, submittedAt: null, score: null, maxScore: 2, examVersion: 1, gradingVersion: 1, lastSavedAt: null, createdAt: now, updatedAt: now };
     await setDoc(doc(db, "attempts", "e_pub__stu1"), { ...attemptBase, studentId: STUDENT });
@@ -225,6 +226,17 @@ describe("answer keys", () => {
 
   it("nobody can write published answer keys from the client", async () => {
     await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "examAnswerKeys", "e_pub", "items", "q1"), { correctOptionId: "o2", points: 9, gradingVersion: 1 }));
+  });
+});
+
+describe("exam access codes (server only)", () => {
+  it("student cannot read an exam access code", async () => {
+    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "examAccessCodes", "e_pub")));
+  });
+
+  it("admin client cannot read or write access codes either", async () => {
+    await assertFails(getDoc(doc(asUser(ADMIN, "ADMIN"), "examAccessCodes", "e_pub")));
+    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "examAccessCodes", "e_pub"), { code: "ZZZ999" }));
   });
 });
 
