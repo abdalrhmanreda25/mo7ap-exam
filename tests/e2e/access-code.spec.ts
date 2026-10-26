@@ -28,3 +28,11 @@ test("admin sees the exam access code with copy and regenerate controls", async 
   // Regenerating would break the code other specs type, so only check the control exists.
   await expect(page.getByRole("button", { name: "توليد كود جديد" })).toBeVisible();
 });
+
+test("admin sees the ready exams with an add button for each", async ({ page }) => {
+  await signIn(page, ACCOUNTS.admin.email, /\/admin$/);
+  await page.goto("/admin/exams");
+  await expect(page.getByRole("heading", { name: "امتحانات جاهزة" })).toBeVisible();
+  await expect(page.getByText("امتحان الأحياء - الباب الثاني: التنسيق الهرموني (صعب جدًا)")).toBeVisible();
+  await expect(page.getByRole("button", { name: "إضافة ونشر" })).toHaveCount(3);
+});
