@@ -40,7 +40,7 @@ test.describe("Excel/CSV import on the subjects page", () => {
     await page.goto("/admin/subjects");
     await page.waitForLoadState("networkidle");
 
-    await page.getByRole("button", { name: "استيراد من Excel" }).click();
+    await page.getByRole("button", { name: "استيراد المواد من Excel" }).click();
     const dialog = page.getByRole("dialog", { name: /استيراد المواد/ });
     await expect(dialog).toBeVisible();
 

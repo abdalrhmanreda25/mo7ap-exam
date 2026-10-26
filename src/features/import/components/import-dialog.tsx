@@ -76,7 +76,7 @@ export function ImportDialog({ kind, examId }: { kind: ImportKind; examId?: stri
     <>
       <Button type="button" variant="outline" onClick={() => dialogRef.current?.showModal()}>
         <Upload className="size-4" aria-hidden="true" />
-        استيراد من Excel
+        استيراد {template.label} من Excel
       </Button>
       <dialog
         ref={dialogRef}
