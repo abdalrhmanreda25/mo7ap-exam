@@ -8,10 +8,17 @@ import { createChapter, createLesson, createSubject, listChapters, listLessons, 
 import { createQuestion } from "@/features/questions/service";
 import { addQuestionToExam, getExam } from "@/features/exams/service";
 import { parseImportFile, type ImportRow } from "./parse";
-import { mapChapters, mapExamQuestions, mapLessons, mapQuestions, mapSubjects, type RowOutcome } from "./mappers";
+import { mapChapters, mapExamQuestions, mapLessons, mapQuestions, mapSubjects, missingColumns, type RowOutcome } from "./mappers";
 
 export type ImportKind = "subjects" | "chapters" | "lessons" | "questions" | "examQuestions";
 const KINDS: ImportKind[] = ["subjects", "chapters", "lessons", "questions", "examQuestions"];
+const KIND_LABELS: Record<ImportKind, string> = {
+  subjects: "المواد",
+  chapters: "الفصول",
+  lessons: "الدروس",
+  questions: "الأسئلة",
+  examQuestions: "أسئلة الامتحان",
+};
 
 export interface ImportPreview {
   kind: ImportKind;
@@ -36,6 +43,10 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
   if (!(file instanceof File)) throw new DomainError("اختر ملفًا أولًا.");
   if (!KINDS.includes(kind)) throw new DomainError("نوع الاستيراد غير معروف.");
   const rows: ImportRow[] = await parseImportFile(file);
+  const missing = missingColumns(kind, rows);
+  if (missing.length > 0) {
+    throw new DomainError(`هذا الملف لا يناسب استيراد ${KIND_LABELS[kind]}. أعمدة ناقصة: ${missing.join("، ")}. تأكد أنك اخترت الملف الصحيح.`);
+  }
   const db = getAdminDb();
 
   if (kind === "subjects") {

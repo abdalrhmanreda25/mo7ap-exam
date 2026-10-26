@@ -19,6 +19,20 @@ export const TEMPLATE_HEADERS = {
   examQuestions: ["questionStatementAr", "points"],
 } as const;
 
+/** Columns each import cannot work without. A file missing them is the wrong file for that import. */
+const REQUIRED_COLUMNS = {
+  subjects: ["nameAr", "slug"],
+  chapters: ["subjectSlug", "titleAr"],
+  lessons: ["subjectSlug", "chapterTitleAr", "titleAr"],
+  questions: ["subjectSlug", "chapterTitleAr", "lessonTitleAr", "statementAr", "option1Ar", "option2Ar", "correct"],
+  examQuestions: ["questionStatementAr"],
+} as const satisfies Record<keyof typeof TEMPLATE_HEADERS, readonly string[]>;
+
+export function missingColumns(kind: keyof typeof TEMPLATE_HEADERS, rows: ImportRow[]): string[] {
+  const present = new Set(Object.keys(rows[0]?.values ?? {}));
+  return REQUIRED_COLUMNS[kind].filter((column) => !present.has(column.toLowerCase()));
+}
+
 const TYPE_ALIASES: Record<string, QuestionType> = {
   single_choice: "SINGLE_CHOICE", single: "SINGLE_CHOICE", "اختيار من متعدد": "SINGLE_CHOICE", "اختيار": "SINGLE_CHOICE",
   true_false: "TRUE_FALSE", truefalse: "TRUE_FALSE", "صح أو خطأ": "TRUE_FALSE", "صح او خطأ": "TRUE_FALSE",

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { normalizeHeader, parseCsv, parseImportFile } from "@/features/import/parse";
-import { mapChapters, mapExamQuestions, mapQuestions, mapSubjects } from "@/features/import/mappers";
+import { mapChapters, mapExamQuestions, mapQuestions, mapSubjects, missingColumns } from "@/features/import/mappers";
 import type { ImportRow } from "@/features/import/parse";
 
 const row = (line: number, values: Record<string, string>): ImportRow => ({ line, values });
@@ -133,5 +133,19 @@ describe("exam composition rows", () => {
     expect(outcomes[0]).toMatchObject({ ok: true, value: { questionId: "q1", points: 2 } });
     expect(outcomes[1].ok).toBe(false);
     expect(outcomes[2].ok).toBe(false);
+  });
+});
+
+describe("wrong file for the import", () => {
+  const rowsWith = (headers: string[]): ImportRow[] => [{ line: 2, values: Object.fromEntries(headers.map((h) => [h, "x"])) }];
+
+  it("names the required columns a chapters file lacks for a questions import", () => {
+    const chaptersFile = rowsWith(["subjectslug", "titlear", "title", "order", "isactive"]);
+    expect(missingColumns("questions", chaptersFile)).toEqual(["chapterTitleAr", "lessonTitleAr", "statementAr", "option1Ar", "option2Ar", "correct"]);
+  });
+
+  it("accepts a file that has every required column", () => {
+    expect(missingColumns("chapters", rowsWith(["subjectslug", "titlear"]))).toEqual([]);
+    expect(missingColumns("examQuestions", rowsWith(["questionstatementar", "points"]))).toEqual([]);
   });
 });
