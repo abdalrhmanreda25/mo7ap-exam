@@ -10,9 +10,11 @@ const db = () => getAdminDb();
 const idSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, { error: "معرّف غير صالح." });
 const seqSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
-export async function startExamAction(examId: string) {
+const accessCodeSchema = z.string().max(32, { error: "الكود غير صحيح." });
+
+export async function startExamAction(examId: string, accessCode: string) {
   return runStudentAction(async (studentId) => ({
-    attemptId: await service.startExam(db(), studentId, idSchema.parse(examId)),
+    attemptId: await service.startExam(db(), studentId, idSchema.parse(examId), accessCodeSchema.parse(accessCode)),
   }));
 }
 

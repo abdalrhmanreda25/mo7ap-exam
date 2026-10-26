@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { startWithCode } from "./start-helper";
 
 process.env.FIREBASE_PROJECT_ID ??= "demo-mo7ap-exam";
 
@@ -6,7 +7,6 @@ const { getAdminDb } = await import("@/lib/firebase/admin-core");
 const curriculum = await import("@/features/curriculum/service");
 const questions = await import("@/features/questions/service");
 const exams = await import("@/features/exams/service");
-const attempts = await import("@/features/attempts/service");
 
 const db = getAdminDb();
 const ADMIN = "test-admin";
@@ -59,7 +59,7 @@ describe("admin exam delete", () => {
 
   it("refuses to delete an exam that a student has started, and keeps it intact", async () => {
     const { examId } = await examWithQuestion(true);
-    await attempts.startExam(db, "student-delete-test", examId);
+    await startWithCode(db, "student-delete-test", examId);
     await expect(exams.deleteExam(db, ADMIN, examId)).rejects.toThrow("أرشفه");
     expect((await db.collection("exams").doc(examId).get()).exists).toBe(true);
     expect(await exams.countExamAttempts(db, examId)).toBe(1);

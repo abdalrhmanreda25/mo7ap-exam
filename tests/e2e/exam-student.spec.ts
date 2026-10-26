@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, TEST_PASSWORD } from "./accounts";
+import { ACCOUNTS, E2E_EXAM_CODE, TEST_PASSWORD } from "./accounts";
 
 async function signIn(page: Page, email: string) {
   await page.goto("/login");
@@ -19,6 +19,13 @@ test.describe("Student exam flow with timer", () => {
     await expect(page.getByRole("link", { name: /اختبار سريع E2E/ })).toBeVisible();
 
     await page.getByRole("link", { name: /اختبار سريع E2E/ }).click();
+    // A wrong code keeps the student on the instructions page.
+    await page.getByLabel("كود الامتحان").fill("WRONG9");
+    await page.getByRole("button", { name: "ابدأ الامتحان" }).click();
+    await expect(page.getByText("الكود غير صحيح.")).toBeVisible();
+    await expect(page).toHaveURL(/\/exams\/e2e-exam$/);
+
+    await page.getByLabel("كود الامتحان").fill(E2E_EXAM_CODE.toLowerCase());
     await page.getByRole("button", { name: "ابدأ الامتحان" }).click();
     await expect(page).toHaveURL(/\/attempts\/[A-Za-z0-9_-]+$/);
     await expect(page.getByRole("button", { name: "ملء الشاشة" })).toBeVisible();

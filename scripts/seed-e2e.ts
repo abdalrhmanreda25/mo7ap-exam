@@ -48,6 +48,8 @@ async function seedPublishedExam() {
     });
     await db.collection("examAnswerKeys").doc("e2e-exam").collection("items").doc(q.id).set({ correctOptionId: q.correct, points: q.points, gradingVersion: 1 });
   }
+  // Must match E2E_EXAM_CODE in tests/e2e/accounts.ts.
+  await db.collection("examAccessCodes").doc("e2e-exam").set({ code: "E2EK7P", createdBy: "e2e-seed", createdAt: now });
 }
 
 async function main() {

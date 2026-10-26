@@ -10,6 +10,7 @@ import {
   type Transaction,
 } from "firebase-admin/firestore";
 import { auditLogWrite } from "@/lib/audit/log";
+import { makeAccessCode } from "@/lib/domain/access-code";
 import { DomainError } from "@/lib/server/errors";
 import { canTransitionExam } from "@/lib/domain/state";
 import type { ExamConfig } from "@/lib/validation/exams";
@@ -575,4 +576,38 @@ export async function cloneExam(db: Firestore, actorUid: string, examId: string)
     }
   }
   return { id: newId, skipped };
+}
+
+/** The code a student must type to start this exam, or null when the admin has not generated one. */
+export async function getAccessCode(db: Firestore, examId: string): Promise<string | null> {
+  const snap = await db.collection(COLLECTIONS.examAccessCodes).doc(examId).get();
+  return snap.exists ? (snap.data()!.code as string) : null;
+}
+
+/**
+ * Generates a new access code for an exam and replaces the old one. Students who already
+ * started keep going without a code; only new starts need the current code.
+ */
+export async function generateAccessCode(db: Firestore, actorUid: string, examId: string): Promise<string> {
+  const examSnap = await db.collection(COLLECTIONS.exams).doc(examId).get();
+  if (!examSnap.exists) throw new DomainError("الامتحان غير موجود.");
+  const previous = await getAccessCode(db, examId);
+  let code = makeAccessCode();
+  while (code === previous) code = makeAccessCode();
+
+  const audit = auditLogWrite(db, actorUid, {
+    action: "EXAM_ACCESS_CODE_GENERATED",
+    targetType: "exam",
+    targetId: examId,
+    metadata: {},
+  });
+  const batch = db.batch();
+  batch.set(db.collection(COLLECTIONS.examAccessCodes).doc(examId), {
+    code,
+    createdBy: actorUid,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+  batch.set(audit.ref, audit.data);
+  await batch.commit();
+  return code;
 }

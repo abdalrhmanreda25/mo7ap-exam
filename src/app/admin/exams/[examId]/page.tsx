@@ -9,11 +9,12 @@ import { listSubjects } from "@/features/curriculum/service";
 import { ExamComposer, type ComposedItem } from "@/features/exams/components/exam-composer";
 import { ExamConfigForm } from "@/features/exams/components/exam-config-form";
 import { readinessIssues } from "@/features/exams/composition";
-import { countExamAttempts, getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
+import { countExamAttempts, getAccessCode, getExam, getExamComposition, listAddableQuestions } from "@/features/exams/service";
 import { DeleteExamButton } from "@/features/exams/components/delete-exam-button";
 import { ReopenAllButton } from "@/features/students/components/student-actions";
 import { ReviewPolicyForm } from "@/features/exams/components/review-policy-form";
 import { CloneExamButton } from "@/features/exams/components/clone-exam-button";
+import { AccessCodePanel } from "@/features/exams/components/access-code-panel";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 
@@ -54,7 +55,7 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
     mediaReferences: c.bank?.mediaReferences ?? [],
   }));
 
-  const attemptCount = await countExamAttempts(db, examId);
+  const [attemptCount, accessCode] = await Promise.all([countExamAttempts(db, examId), getAccessCode(db, examId)]);
 
   const tone = exam.status === "PUBLISHED" ? "success" : exam.status === "DRAFT" ? "primary" : "neutral";
 
@@ -71,6 +72,7 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
         }
       />
       <div className="space-y-10">
+        {exam.status === "PUBLISHED" && <AccessCodePanel examId={exam.id} code={accessCode} />}
         {exam.status !== "DRAFT" && (
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-5">

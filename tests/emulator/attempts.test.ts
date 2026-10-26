@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { startWithCode } from "./start-helper";
 import { Timestamp } from "firebase-admin/firestore";
 
 process.env.FIREBASE_PROJECT_ID ??= "demo-mo7ap-exam";
@@ -39,6 +40,7 @@ async function publishedExam(opts: Partial<{ showCorrect: boolean; showExplanati
   await exams.addQuestionToExam(db, ADMIN, examId, q1, 2);
   await exams.addQuestionToExam(db, ADMIN, examId, q2, 3);
   await exams.publishExam(db, ADMIN, examId);
+  await exams.generateAccessCode(db, ADMIN, examId);
   return { examId, q1, q2 };
 }
 
@@ -52,9 +54,9 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("returns the same attempt on repeat starts and under concurrent starts, and creates exactly one", async () => {
     const { examId } = await publishedExam();
-    const ids = await Promise.all(Array.from({ length: 5 }, () => attempts.startExam(db, STUDENT, examId)));
+    const ids = await Promise.all(Array.from({ length: 5 }, () => startWithCode(db, STUDENT, examId)));
     expect(new Set(ids).size).toBe(1);
-    expect(await attempts.startExam(db, STUDENT, examId)).toBe(ids[0]);
+    expect(await startWithCode(db, STUDENT, examId)).toBe(ids[0]);
     expect(await attemptCount(examId, STUDENT)).toBe(1);
   });
 
@@ -69,12 +71,12 @@ describe("attempt engine (Firestore emulator)", () => {
       durationSeconds: 600, shuffleQuestions: false, shuffleOptions: false,
       showScoreAfterSubmit: true, showCorrectAnswersAfterSubmit: false, showExplanationsAfterSubmit: false,
     });
-    await expect(attempts.startExam(db, STUDENT, examId)).rejects.toThrow();
+    await expect(startWithCode(db, STUDENT, examId)).rejects.toThrow();
   });
 
   it("saves answers, rejects foreign options, and ignores stale sequence numbers", async () => {
     const { examId, q1 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
 
     await expect(attempts.saveAnswer(db, STUDENT, id, q1, "zzz", 1)).rejects.toThrow("الخيار");
     expect((await attempts.saveAnswer(db, STUDENT, id, q1, "b", 5)).saved).toBe(true);
@@ -85,7 +87,7 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("rejects saves after the server deadline, even though the attempt is still open", async () => {
     const { examId, q1 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await db.collection("attempts").doc(id).update({ deadlineAt: Timestamp.fromMillis(Date.now() - 1000) });
     const result = await attempts.saveAnswer(db, STUDENT, id, q1, "b", 1);
     expect(result).toEqual({ saved: false, reason: "DEADLINE_PASSED" });
@@ -93,7 +95,7 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("grades on submit with trusted keys, and a repeated submit changes nothing", async () => {
     const { examId, q1, q2 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.saveAnswer(db, STUDENT, id, q1, "b", 1); // correct, 2 points
     await attempts.saveAnswer(db, STUDENT, id, q2, "c", 1); // wrong, 3 points
 
@@ -109,14 +111,14 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("refuses answers after submit", async () => {
     const { examId, q1 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.submitAttempt(db, STUDENT, id);
     expect(await attempts.saveAnswer(db, STUDENT, id, q1, "b", 99)).toEqual({ saved: false, reason: "NOT_IN_PROGRESS" });
   });
 
   it("finalizes an expired attempt from saved answers only, on access", async () => {
     const { examId, q1, q2 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.saveAnswer(db, STUDENT, id, q1, "b", 1);
     const deadline = Date.now() - 5000;
     await db.collection("attempts").doc(id).update({ deadlineAt: Timestamp.fromMillis(deadline) });
@@ -131,20 +133,20 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("hides another student's attempt", async () => {
     const { examId } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     expect(await attempts.getAttemptView(db, OTHER, id)).toBeNull();
   });
 
   it("shows correct answers and explanations only when the review policy allows", async () => {
     const hidden = await publishedExam({ showCorrect: false, showExplanations: false });
-    const hid = await attempts.startExam(db, STUDENT, hidden.examId);
+    const hid = await startWithCode(db, STUDENT, hidden.examId);
     await attempts.submitAttempt(db, STUDENT, hid);
     const hiddenView = await attempts.getAttemptView(db, STUDENT, hid);
     expect(hiddenView?.result?.correct).toBeNull();
     expect(hiddenView?.result?.explanations).toBeNull();
 
     const shown = await publishedExam({ showCorrect: true, showExplanations: true });
-    const sid = await attempts.startExam(db, STUDENT, shown.examId);
+    const sid = await startWithCode(db, STUDENT, shown.examId);
     await attempts.submitAttempt(db, STUDENT, sid);
     const shownView = await attempts.getAttemptView(db, STUDENT, sid);
     expect(shownView?.result?.correct?.[shown.q1]).toBe("b");
@@ -153,7 +155,7 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("keeps option and question order stable per attempt, and every option present", async () => {
     const { examId } = await publishedExam({ shuffle: true });
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     const view = await attempts.getAttemptView(db, STUDENT, id);
     for (const q of view!.questions) expect(q.options.map((o) => o.id).sort()).toEqual(["a", "b", "c"]);
     const again = await attempts.getAttemptView(db, STUDENT, id);
@@ -162,7 +164,7 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("counts fullscreen exits for the owner only, and only while the attempt is active", async () => {
     const { examId } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.recordFullscreenExit(db, STUDENT, id);
     await attempts.recordFullscreenExit(db, STUDENT, id);
     expect((await db.collection("attempts").doc(id).get()).data()!.fullscreenExits).toBe(2);
@@ -175,7 +177,7 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("reopen moves attempt, answers, and result to history and lets the student start again", async () => {
     const { examId, q1 } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.saveAnswer(db, STUDENT, id, q1, "b", 1);
     await attempts.submitAttempt(db, STUDENT, id);
 
@@ -189,7 +191,7 @@ describe("attempt engine (Firestore emulator)", () => {
     expect((await db.collection("attempts").doc(archived).collection("answers").doc(q1).get()).data()?.selectedOptionId).toBe("b");
     expect((await db.collection("results").doc(archived).get()).data()).toMatchObject({ score: 2, superseded: true });
 
-    const again = await attempts.startExam(db, STUDENT, examId);
+    const again = await startWithCode(db, STUDENT, examId);
     expect(again).toBe(id);
     expect((await db.collection("attempts").doc(again).get()).data()!.status).toBe("IN_PROGRESS");
     expect((await attempts.getAttemptView(db, STUDENT, again))!.answers).toEqual({});
@@ -200,25 +202,25 @@ describe("attempt engine (Firestore emulator)", () => {
 
   it("refuses to reopen an attempt still in progress", async () => {
     const { examId } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await expect(students.reopenAttempt(db, ADMIN, id, "سبب")).rejects.toThrow("جارية");
   });
 
   it("second reopen gets the next history version", async () => {
     const { examId } = await publishedExam();
-    const id = await attempts.startExam(db, STUDENT, examId);
+    const id = await startWithCode(db, STUDENT, examId);
     await attempts.submitAttempt(db, STUDENT, id);
     await students.reopenAttempt(db, ADMIN, id, "أول");
-    await attempts.startExam(db, STUDENT, examId);
+    await startWithCode(db, STUDENT, examId);
     await attempts.submitAttempt(db, STUDENT, id);
     expect(await students.reopenAttempt(db, ADMIN, id, "ثاني")).toBe(`${id}__v2`);
   });
 
   it("reopen for all reopens finished attempts and skips in-progress ones", async () => {
     const { examId } = await publishedExam();
-    const done = await attempts.startExam(db, STUDENT, examId);
+    const done = await startWithCode(db, STUDENT, examId);
     await attempts.submitAttempt(db, STUDENT, done);
-    await attempts.startExam(db, OTHER, examId);
+    await startWithCode(db, OTHER, examId);
     const outcome = await students.reopenExamForAll(db, ADMIN, examId, "إعادة للجميع");
     expect(outcome).toMatchObject({ reopened: 1, skipped: 1 });
   });

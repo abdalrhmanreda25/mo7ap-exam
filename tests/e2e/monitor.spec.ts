@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ACCOUNTS, TEST_PASSWORD } from "./accounts";
+import { ACCOUNTS, TEST_PASSWORD, E2E_EXAM_CODE } from "./accounts";
 
 async function signIn(page: Page, email: string) {
   await page.goto("/login");
@@ -32,6 +32,7 @@ test.describe("Camera monitoring (live, no storage)", () => {
 
     await signIn(student, ACCOUNTS.monitor.email);
     await student.goto("/exams/e2e-exam");
+    await student.getByLabel("كود الامتحان").fill(E2E_EXAM_CODE);
     await student.getByRole("button", { name: "ابدأ الامتحان" }).click();
     await expect(student).toHaveURL(/\/attempts\/[A-Za-z0-9_-]+$/, { timeout: 30000 });
     await expect(student.getByText("الكاميرا تعمل")).toBeVisible({ timeout: 20000 });

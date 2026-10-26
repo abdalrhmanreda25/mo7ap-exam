@@ -1,10 +1,10 @@
 /**
- * Loads a chapter-1 content file into the subject "chemistry":
+ * Loads an exam content file (content/*.json) into its subject (subjectSlug, default "chemistry"):
  * chapter, lessons, questions (READY, difficulty from exam.difficulty), and a published exam.
  * Idempotent: reuses chapter, lessons, and questions with the same text; skips the exam if the title exists.
  * Existing questions get their lesson and images synced; neither is locked content.
  *
- *   npx tsx --conditions=react-server scripts/import-chemistry-ch1.ts [content/chemistry-ch1-medium.json]
+ *   npx tsx --conditions=react-server scripts/import-exam-content.ts [content/chemistry-ch1-medium.json]
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -14,7 +14,7 @@ import * as questions from "../src/features/questions/service";
 import * as exams from "../src/features/exams/service";
 import { COLLECTIONS } from "../src/types/firestore";
 
-const ACTOR = "content-import-chemistry-ch1";
+const ACTOR = "content-import";
 const contentFile = process.argv[2] ?? "content/chemistry-ch1-medium.json";
 const data = JSON.parse(readFileSync(path.resolve(contentFile), "utf8"));
 const difficulty: "EASY" | "MEDIUM" | "HARD" = data.exam.difficulty ?? "MEDIUM";
@@ -22,8 +22,9 @@ const LETTERS = ["o1", "o2", "o3", "o4", "o5", "o6"];
 
 async function main() {
   const db = getAdminDb();
-  const subjectSnap = await db.collection(COLLECTIONS.subjects).where("slug", "==", "chemistry").limit(1).get();
-  if (subjectSnap.empty) throw new Error("Subject 'chemistry' not found. Run scripts/seed-subjects.ts first.");
+  const slug: string = data.subjectSlug ?? "chemistry";
+  const subjectSnap = await db.collection(COLLECTIONS.subjects).where("slug", "==", slug).limit(1).get();
+  if (subjectSnap.empty) throw new Error(`Subject '${slug}' not found. Run scripts/seed-subjects.ts first.`);
   const subjectId = subjectSnap.docs[0].id;
 
   // Chapter

@@ -19,6 +19,7 @@ export const COLLECTIONS = {
   exams: "exams",
   examQuestions: "questions", // subcollection: exams/{examId}/questions
   examAnswerKeys: "examAnswerKeys", // examAnswerKeys/{examId}/items
+  examAccessCodes: "examAccessCodes", // examAccessCodes/{examId}, server only
   attempts: "attempts",
   attemptAnswers: "answers", // subcollection: attempts/{attemptId}/answers
   results: "results",

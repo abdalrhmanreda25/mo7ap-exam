@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomInt } from "node:crypto";
 import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
+import { normalizeAccessCode } from "@/lib/domain/access-code";
 import { attemptIdFor, resultIdFor } from "@/lib/domain/ids";
 import { canTransitionAttempt, decideAnswerSave, decideStart, isDeadlinePassed } from "@/lib/domain/state";
 import { DomainError } from "@/lib/server/errors";
@@ -86,9 +87,10 @@ export async function getAttemptIdState(db: Firestore, studentId: string, examId
  * Starts the single attempt for (student, exam). The attempt ID is deterministic, so concurrent
  * starts serialize inside the transaction and only one attempt can exist. A second call returns the existing attempt.
  */
-export async function startExam(db: Firestore, studentId: string, examId: string): Promise<string> {
+export async function startExam(db: Firestore, studentId: string, examId: string, accessCode: string): Promise<string> {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   const attemptRef = db.collection(COLLECTIONS.attempts).doc(attemptIdFor(examId, studentId));
+  const codeRef = db.collection(COLLECTIONS.examAccessCodes).doc(examId);
 
   return db.runTransaction(async (tx) => {
     const attemptSnap = await tx.get(attemptRef);
@@ -101,6 +103,11 @@ export async function startExam(db: Firestore, studentId: string, examId: string
     if (!decision.allowed) {
       throw new DomainError(decision.reason === "EXAM_ARCHIVED" ? "هذا الامتحان مؤرشف." : "هذا الامتحان غير متاح الآن.");
     }
+
+    // Only a new start needs the code. Resuming an attempt (refresh, reopened tab) returned above.
+    const codeSnap = await tx.get(codeRef);
+    if (!codeSnap.exists) throw new DomainError("لم يتم إنشاء كود لهذا الامتحان بعد. اطلب الكود من المشرف.");
+    if (normalizeAccessCode(accessCode) !== codeSnap.data()!.code) throw new DomainError("الكود غير صحيح.");
 
     const questionsSnap = await tx.get(examRef.collection(COLLECTIONS.examQuestions));
     const questions = questionsSnap.docs

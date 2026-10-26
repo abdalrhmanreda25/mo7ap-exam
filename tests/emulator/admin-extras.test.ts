@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { startWithCode } from "./start-helper";
 
 process.env.FIREBASE_PROJECT_ID ??= "demo-mo7ap-exam";
 
@@ -68,7 +69,7 @@ describe("admin extras (emulator)", () => {
 
   it("review policy can change on a published exam and is used when results are viewed", async () => {
     const { examId, qid } = await setup();
-    const id = await attempts.startExam(db, "rp-student", examId);
+    const id = await startWithCode(db, "rp-student", examId);
     await attempts.saveAnswer(db, "rp-student", id, qid, "b", 1);
     await attempts.submitAttempt(db, "rp-student", id);
     expect((await attempts.getAttemptView(db, "rp-student", id))!.result!.correct).toBeNull();
@@ -81,7 +82,7 @@ describe("admin extras (emulator)", () => {
     const { examId, qid } = await setup();
     const email = `stats-${Date.now()}@example.test`;
     const { uid } = await provisionUser({ email, displayName: "إحصاء", role: "STUDENT", actorUid: ADMIN });
-    const id = await attempts.startExam(db, uid, examId);
+    const id = await startWithCode(db, uid, examId);
     await attempts.saveAnswer(db, uid, id, qid, "b", 1);
     await attempts.submitAttempt(db, uid, id);
 
@@ -101,7 +102,7 @@ describe("admin extras (emulator)", () => {
     expect(user).toMatchObject({ displayName: "جديد", email: newEmail });
     expect((await db.collection("users").doc(uid).get()).data()).toMatchObject({ displayName: "جديد", email: newEmail });
 
-    await attempts.startExam(db, uid, examId);
+    await startWithCode(db, uid, examId);
     await expect(students.deleteStudent(db, ADMIN, uid)).rejects.toThrow("امتحان الآن");
 
     const other = await provisionUser({ email: `del-${Date.now()}@example.test`, displayName: "حذف", role: "STUDENT", actorUid: ADMIN });
@@ -113,7 +114,7 @@ describe("admin extras (emulator)", () => {
   it("admin edits while a student is mid-exam never lose the student's saved answers", async () => {
     const { examId, qid, base } = await setup();
     const student = "mid-exam-student";
-    const id = await attempts.startExam(db, student, examId);
+    const id = await startWithCode(db, student, examId);
     await attempts.saveAnswer(db, student, id, qid, "b", 1);
 
     // Everything the admin can do to a published exam while it is being taken:

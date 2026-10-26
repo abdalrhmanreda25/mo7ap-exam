@@ -96,3 +96,7 @@ export async function updateReviewPolicyAction(examId: string, policy: unknown) 
 export async function cloneExamAction(examId: string) {
   return runAdminAction(async (actor) => service.cloneExam(db(), actor, idSchema.parse(examId)));
 }
+
+export async function generateAccessCodeAction(examId: string) {
+  return runAdminAction(async (actor) => ({ code: await service.generateAccessCode(db(), actor, idSchema.parse(examId)) }));
+}
