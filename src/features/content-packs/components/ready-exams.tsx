@@ -65,7 +65,7 @@ export function ReadyExams({ packs }: { packs: ReadyExam[] }) {
               <StatusBadge tone="success">مضاف</StatusBadge>
             ) : (
               <Button type="button" disabled={pending} onClick={() => add(pack.id)}>
-                {running === pack.id ? "جارٍ الإضافة..." : "إضافة ونشر"}
+                {running === pack.id ? "جارٍ الإضافة..." : pending ? "انتظر انتهاء الإضافة" : "إضافة ونشر"}
               </Button>
             )}
           </li>
