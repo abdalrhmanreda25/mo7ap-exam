@@ -207,6 +207,20 @@ async function finalize(db: Firestore, attemptId: string, submittedAtMs: number)
   });
 }
 
+/**
+ * Grades every attempt whose deadline passed while the student was away. A student finalizes
+ * their own attempt on return, but admin views must not show an abandoned attempt as running,
+ * because a running attempt blocks reopen and delete. Optionally limited to one student.
+ */
+export async function settleExpiredAttempts(db: Firestore, filter: { studentId?: string } = {}): Promise<number> {
+  let query: FirebaseFirestore.Query = db.collection(COLLECTIONS.attempts).where("status", "==", "IN_PROGRESS");
+  if (filter.studentId) query = query.where("studentId", "==", filter.studentId);
+  const now = Date.now();
+  const expired = (await query.get()).docs.filter((doc) => isDeadlinePassed(millisOf(doc.data().deadlineAt), now));
+  await Promise.all(expired.map((doc) => finalize(db, doc.id, millisOf(doc.data().deadlineAt))));
+  return expired.length;
+}
+
 /** Student submit. Returns the final state. Repeating it changes nothing. */
 export async function submitAttempt(db: Firestore, studentId: string, attemptId: string): Promise<void> {
   const snap = await db.collection(COLLECTIONS.attempts).doc(attemptId).get();

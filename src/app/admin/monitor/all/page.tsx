@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/types/firestore";
 import { CameraViewer } from "@/features/monitor/components/camera-viewer";
+import { settleExpiredAttempts } from "@/features/attempts/service";
 
 export const metadata: Metadata = { title: "كل الكاميرات" };
 
@@ -30,6 +31,7 @@ export default function MonitorAllPage() {
 async function Grid() {
   await connection();
   const db = getAdminDb();
+  await settleExpiredAttempts(db);
   const active = await db.collection(COLLECTIONS.attempts).where("status", "==", "IN_PROGRESS").get();
   const rows = await Promise.all(
     active.docs.map(async (doc) => {

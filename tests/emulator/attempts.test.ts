@@ -131,6 +131,30 @@ describe("attempt engine (Firestore emulator)", () => {
     expect(view?.answers[q2]).toBeUndefined();
   });
 
+  it("admin views finalize an expired attempt the student never came back to", async () => {
+    const { examId, q1 } = await publishedExam();
+    const student = `left-${Date.now()}`;
+    const id = await startWithCode(db, student, examId);
+    await attempts.saveAnswer(db, student, id, q1, "b", 1);
+    await db.collection("attempts").doc(id).update({ deadlineAt: Timestamp.fromMillis(Date.now() - 5000) });
+
+    const rows = await students.listStudentAttempts(db, student);
+    expect(rows.find((r) => r.attemptId === id)).toMatchObject({ status: "GRADED", score: 2 });
+    // No longer counted as running, so the admin can reopen it.
+    expect(await students.reopenAttempt(db, ADMIN, id, "انتهى الوقت")).toBe(`${id}__v1`);
+  });
+
+  it("settles every expired attempt and leaves running ones alone", async () => {
+    const { examId } = await publishedExam();
+    const expired = await startWithCode(db, `exp-${Date.now()}`, examId);
+    const running = await startWithCode(db, `run-${Date.now()}`, examId);
+    await db.collection("attempts").doc(expired).update({ deadlineAt: Timestamp.fromMillis(Date.now() - 1000) });
+
+    await attempts.settleExpiredAttempts(db);
+    expect((await db.collection("attempts").doc(expired).get()).data()!.status).toBe("GRADED");
+    expect((await db.collection("attempts").doc(running).get()).data()!.status).toBe("IN_PROGRESS");
+  });
+
   it("hides another student's attempt", async () => {
     const { examId } = await publishedExam();
     const id = await startWithCode(db, STUDENT, examId);

@@ -5,6 +5,7 @@ import { getAdminAuth } from "@/lib/firebase/admin";
 import { auditLogWrite } from "@/lib/audit/log";
 import { DomainError } from "@/lib/server/errors";
 import { COLLECTIONS, type AttemptStatus } from "@/types/firestore";
+import { settleExpiredAttempts } from "@/features/attempts/service";
 
 export interface StudentRow {
   uid: string;
@@ -29,6 +30,7 @@ export interface StudentAttemptRow {
 }
 
 export async function listStudents(db: Firestore): Promise<StudentRow[]> {
+  await settleExpiredAttempts(db);
   const [users, attempts] = await Promise.all([
     db.collection(COLLECTIONS.users).where("role", "==", "STUDENT").get(),
     db.collection(COLLECTIONS.attempts).get(),
@@ -68,6 +70,7 @@ export async function getStudent(db: Firestore, uid: string) {
 }
 
 export async function listStudentAttempts(db: Firestore, uid: string): Promise<StudentAttemptRow[]> {
+  await settleExpiredAttempts(db, { studentId: uid });
   const snap = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).get();
   const examIds = [...new Set(snap.docs.map((d) => d.data().examId as string))];
   const exams = await Promise.all(examIds.map((id) => db.collection(COLLECTIONS.exams).doc(id).get()));
@@ -98,6 +101,7 @@ export async function listStudentAttempts(db: Firestore, uid: string): Promise<S
  */
 export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: string, reason: string): Promise<string> {
   if (attemptId.includes("__v")) throw new DomainError("هذه نسخة محفوظة من محاولة سابقة، وليست المحاولة الحالية.");
+  await settleExpiredAttempts(db);
   const attemptRef = db.collection(COLLECTIONS.attempts).doc(attemptId);
   const resultRef = db.collection(COLLECTIONS.results).doc(attemptId);
 
@@ -144,6 +148,7 @@ export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: 
 
 /** Reopens every finished, current attempt of an exam. In-progress attempts are left alone. */
 export async function reopenExamForAll(db: Firestore, actorUid: string, examId: string, reason: string) {
+  await settleExpiredAttempts(db);
   const exam = await db.collection(COLLECTIONS.exams).doc(examId).get();
   if (!exam.exists) throw new DomainError("الامتحان غير موجود.");
   const snap = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).get();
@@ -206,6 +211,7 @@ export interface StudentStats {
 
 /** Statistics from persisted, current (non-superseded) attempts only. No estimates. */
 export async function getStudentStats(db: Firestore, uid: string): Promise<StudentStats> {
+  await settleExpiredAttempts(db, { studentId: uid });
   const attemptsSnap = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).get();
   const current = attemptsSnap.docs.filter((d) => !d.data().superseded);
   const finished = current.filter((d) => d.data().status !== "IN_PROGRESS");
@@ -356,6 +362,7 @@ export async function updateStudent(
  * Refused while the student is in the middle of an exam.
  */
 export async function deleteStudent(db: Firestore, actorUid: string, uid: string) {
+  await settleExpiredAttempts(db, { studentId: uid });
   const student = await getStudent(db, uid);
   if (!student) throw new DomainError("الطالب غير موجود.");
   const active = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).where("status", "==", "IN_PROGRESS").limit(1).get();
