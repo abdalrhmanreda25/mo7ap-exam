@@ -105,6 +105,27 @@ export function CameraGate({ attemptId, studentId, children }: { attemptId: stri
 /** Publishes the camera to the admin. Returns a cleanup that closes the connection and marks the session ended. */
 type LinkState = "connecting" | "connected" | "failed";
 
+interface Link {
+  pc: RTCPeerConnection;
+  viewerId: string | null;
+  answerApplied: boolean;
+  remoteReady: boolean;
+  remoteCandidates: RTCIceCandidateInit[];
+}
+
+/** Firestore candidate docs carry the viewer they belong to; WebRTC wants only the candidate fields. */
+const toCandidate = ({ candidate, sdpMid, sdpMLineIndex, usernameFragment }: RTCIceCandidateInit): RTCIceCandidateInit => ({
+  candidate,
+  sdpMid,
+  sdpMLineIndex,
+  usernameFragment,
+});
+
+/**
+ * One peer connection per admin viewer. Each viewer (a monitor page opened, or opened again after
+ * leaving it) writes request.viewerId; the student answers with a fresh offer for that viewer.
+ * The camera stream itself is reused across connections.
+ */
 function startBroadcast(
   attemptId: string,
   studentId: string,
@@ -112,98 +133,113 @@ function startBroadcast(
   onLink: (state: LinkState) => void,
 ): () => void {
   const db = getClientDb();
-  const pc = new RTCPeerConnection(RTC_CONFIG);
   const sessionRef = doc(db, SESSION_COLLECTION, attemptId);
   const unsubs: (() => void)[] = [];
   let closed = false;
-  // Candidates can appear before the session document exists. Rules need the document, so hold them until it does.
-  let sessionReady = false;
-  const pending: RTCIceCandidate[] = [];
+  let current: Link | null = null;
 
-  const send = (candidate: RTCIceCandidate) => {
-    addDoc(collection(sessionRef, "studentCandidates"), candidate.toJSON()).catch((err: unknown) =>
+  const send = (viewerId: string | null, candidate: RTCIceCandidate) => {
+    addDoc(collection(sessionRef, "studentCandidates"), { ...candidate.toJSON(), viewerId: viewerId ?? "" }).catch((err: unknown) =>
       console.warn("[monitor] send candidate failed", err),
     );
   };
-  stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "connected") onLink("connected");
-    if (pc.connectionState === "failed") {
-      console.warn("[monitor] peer connection failed");
-      onLink("failed");
-    }
+
+  const connect = async (viewerId: string | null) => {
+    current?.pc.close();
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const link: Link = { pc, viewerId, answerApplied: false, remoteReady: false, remoteCandidates: [] };
+    current = link;
+    onLink("connecting");
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    // Candidates can appear before the session document exists. Rules need the document, so hold them until it does.
+    let written = false;
+    const early: RTCIceCandidate[] = [];
+    pc.onconnectionstatechange = () => {
+      if (current !== link) return;
+      if (pc.connectionState === "connected") onLink("connected");
+      if (pc.connectionState === "failed") onLink("failed");
+    };
+    pc.onicecandidate = (event) => {
+      if (!event.candidate || closed || current !== link) return;
+      if (written) send(viewerId, event.candidate);
+      else early.push(event.candidate);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    if (closed || current !== link) return;
+    // No read first: rules deny reading a session that does not exist yet. A merge write passes the
+    // create rule (new session) and the update rule (reconnect), and keeps the admin's request.
+    await setDoc(
+      sessionRef,
+      { studentId, offer: { type: offer.type, sdp: offer.sdp }, offerFor: viewerId, answer: null, status: "live", updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+    written = true;
+    early.splice(0).forEach((c) => send(viewerId, c));
   };
-  pc.onicecandidate = (event) => {
-    if (!event.candidate || closed) return;
-    if (sessionReady) send(event.candidate);
-    else pending.push(event.candidate);
+
+  const fail = (err: unknown) => {
+    console.warn("[monitor] signaling failed", err);
+    if (!closed) onLink("failed");
   };
 
   void (async () => {
     // Firestore writes must carry the restored login; wait for it before signaling.
     await getClientAuth().authStateReady();
     if (closed) return;
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    // No read first: rules deny reading a session that does not exist yet. A full write with the same
-    // studentId passes the create rule (new session) and the update rule (reconnect).
+    await connect(null);
     if (closed) return;
-    await setDoc(sessionRef, {
-      studentId,
-      offer: { type: offer.type, sdp: offer.sdp },
-      answer: null,
-      status: "live",
-      updatedAt: serverTimestamp(),
-    }).catch((err: unknown) => {
-      console.warn("[monitor] write session failed", err);
-      throw err;
-    });
-    if (closed) return;
-    sessionReady = true;
-    pending.splice(0).forEach(send);
 
-    // ICE candidates are only valid after the remote description is set. Hold early ones.
-    const remoteCandidates: RTCIceCandidateInit[] = [];
-    let remoteReady = false;
-    let answerApplied = false;
-    const addRemote = (c: RTCIceCandidateInit) => {
-      if (remoteReady) pc.addIceCandidate(c).catch(() => undefined);
-      else remoteCandidates.push(c);
-    };
     unsubs.push(
-      onSnapshot(sessionRef, (snap) => {
-        const answer = snap.data()?.answer;
-        // Snapshots can repeat (e.g. when the server timestamp resolves). Apply the answer exactly once.
-        if (answer && !answerApplied && pc.signalingState === "have-local-offer" && !closed) {
-          answerApplied = true;
-          pc.setRemoteDescription(answer)
-            .then(() => {
-              remoteReady = true;
-              remoteCandidates.splice(0).forEach((c) => pc.addIceCandidate(c).catch(() => undefined));
-            })
-            .catch((err: unknown) => {
-              console.warn("[monitor] applying answer failed", err);
-              onLink("failed");
-            });
-        }
-      }, (err) => console.warn("[monitor] listen session failed", err)),
+      onSnapshot(
+        sessionRef,
+        (snap) => {
+          const data = snap.data();
+          const link = current;
+          if (!data || closed || !link) return;
+          const wanted = (data.request?.viewerId as string | undefined) ?? null;
+          if (wanted && wanted !== link.viewerId) {
+            connect(wanted).catch(fail);
+            return;
+          }
+          // Snapshots repeat (e.g. when a server timestamp resolves). Apply each answer exactly once.
+          if (data.answer && data.offerFor === link.viewerId && !link.answerApplied && link.pc.signalingState === "have-local-offer") {
+            link.answerApplied = true;
+            link.pc
+              .setRemoteDescription(data.answer)
+              .then(() => {
+                link.remoteReady = true;
+                link.remoteCandidates.splice(0).forEach((c) => link.pc.addIceCandidate(c).catch(() => undefined));
+              })
+              .catch(fail);
+          }
+        },
+        (err) => console.warn("[monitor] listen session failed", err),
+      ),
     );
     unsubs.push(
-      onSnapshot(collection(sessionRef, "adminCandidates"), (snap) => {
-        snap.docChanges().forEach((change) => {
-          if (change.type === "added" && !closed) addRemote(change.doc.data());
-        });
-      }, (err) => console.warn("[monitor] listen admin candidates failed", err)),
+      onSnapshot(
+        collection(sessionRef, "adminCandidates"),
+        (snap) => {
+          snap.docChanges().forEach((change) => {
+            const link = current;
+            const data = change.doc.data() as RTCIceCandidateInit & { viewerId?: string };
+            if (change.type !== "added" || closed || !link || !link.viewerId || data.viewerId !== link.viewerId) return;
+            // ICE candidates are only valid after the remote description is set. Hold early ones.
+            if (link.remoteReady) link.pc.addIceCandidate(toCandidate(data)).catch(() => undefined);
+            else link.remoteCandidates.push(toCandidate(data));
+          });
+        },
+        (err) => console.warn("[monitor] listen admin candidates failed", err),
+      ),
     );
-  })().catch((err: unknown) => {
-    console.warn("[monitor] signaling setup failed", err);
-    if (!closed) onLink("failed");
-  });
+  })().catch(fail);
 
   return () => {
     closed = true;
     unsubs.forEach((u) => u());
-    pc.close();
+    current?.pc.close();
     void updateDoc(sessionRef, { status: "ended", updatedAt: serverTimestamp() }).catch(() => undefined);
   };
 }

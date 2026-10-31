@@ -6,54 +6,162 @@ import { getClientDb } from "@/lib/firebase/firestore-client";
 import { getClientAuth } from "@/lib/firebase/client";
 import { RTC_CONFIG, SESSION_COLLECTION } from "../rtc";
 import { StatusBadge } from "@/components/layout/page-header";
+import { Button } from "@/components/ui/button";
 
-type Status = "waiting" | "connecting" | "live" | "ended" | "error";
+type Status = "waiting" | "connecting" | "live" | "ended" | "elsewhere" | "error";
 interface Offer {
   type: RTCSdpType;
   sdp: string;
 }
 
+/** Firestore candidate docs carry the viewer they belong to; WebRTC wants only the candidate fields. */
+const toCandidate = ({ candidate, sdpMid, sdpMLineIndex, usernameFragment }: RTCIceCandidateInit): RTCIceCandidateInit => ({
+  candidate,
+  sdpMid,
+  sdpMLineIndex,
+  usernameFragment,
+});
+
 /**
- * Admin side. Answers the student's offer and shows the live camera. Nothing is recorded.
- * A new offer (student reconnected) gets a fresh peer connection. Errors are shown, not swallowed.
+ * Admin side. Each mount is a new viewer: it asks the student for a fresh offer (request.viewerId),
+ * answers only the offer made for it, and shows the live camera. Leaving the page and coming back
+ * therefore reconnects. Nothing is recorded. Errors are shown, not swallowed.
  */
 export function CameraViewer({ attemptId }: { attemptId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [offer, setOffer] = useState<Offer | null>(null);
+  const claimRef = useRef<() => void>(() => undefined);
   const [status, setStatus] = useState<Status>("waiting");
   const [error, setError] = useState<string | null>(null);
 
-  // Watch the session document. Refresh the ID token first: the rules need the role claim,
-  // and a token issued before the claim was set would be denied.
   useEffect(() => {
+    const viewerId = crypto.randomUUID();
     let cancelled = false;
-    let unsub: (() => void) | undefined;
-    const attach = (sessionRef: ReturnType<typeof doc>) =>
-      onSnapshot(
-        sessionRef,
-        (snap) => {
-          const data: DocumentData | undefined = snap.data();
-          if (!data) return;
-          if (data.status === "ended") {
-            setStatus("ended");
-            setOffer(null);
-            return;
-          }
-          if (data.offer) setStatus((prev) => (prev === "live" ? prev : "connecting"));
-          setOffer(data.offer ?? null);
-        },
-        (err) => {
-          setStatus("error");
-          setError(
-            err.code === "permission-denied"
-              ? "لا تملك صلاحية مشاهدة هذه الجلسة. سجّل الخروج ثم الدخول من جديد بحساب المشرف."
-              : `تعذر قراءة الجلسة: ${err.code}`,
-          );
-        },
-      );
+    let pc: RTCPeerConnection | null = null;
+    let answeredSdp: string | null = null;
+    let requested = false;
+    let remoteReady = false;
+    const pendingCandidates: RTCIceCandidateInit[] = [];
+    const unsubs: (() => void)[] = [];
+    const sessionRef = doc(getClientDb(), SESSION_COLLECTION, attemptId);
 
+    const closePeer = () => {
+      pc?.close();
+      pc = null;
+      remoteReady = false;
+      answeredSdp = null;
+    };
+
+    const claim = () => {
+      requested = true;
+      setStatus("connecting");
+      updateDoc(sessionRef, { request: { viewerId, at: serverTimestamp() }, updatedAt: serverTimestamp() }).catch((err: { code?: string }) => {
+        if (!cancelled) {
+          setStatus("error");
+          setError(`تعذر طلب الاتصال بالطالب: ${err.code ?? "unknown"}`);
+        }
+      });
+    };
+    claimRef.current = claim;
+
+    const answer = async (offer: Offer) => {
+      closePeer();
+      const peer = new RTCPeerConnection(RTC_CONFIG);
+      pc = peer;
+      answeredSdp = offer.sdp;
+      peer.ontrack = (event) => {
+        if (videoRef.current) videoRef.current.srcObject = event.streams[0];
+      };
+      peer.onicecandidate = (event) => {
+        if (!event.candidate || cancelled || pc !== peer) return;
+        addDoc(collection(sessionRef, "adminCandidates"), { ...event.candidate.toJSON(), viewerId }).catch((err: { code?: string }) =>
+          setError(`تعذر إرسال الاتصال: ${err.code ?? "unknown"}`),
+        );
+      };
+      peer.onconnectionstatechange = () => {
+        if (pc !== peer) return;
+        // "Live" means media can actually flow, not just that a track was negotiated.
+        if (peer.connectionState === "connected") {
+          setStatus("live");
+          setError(null);
+        }
+        if (peer.connectionState === "failed") {
+          setStatus("error");
+          setError("فشل الاتصال بالكاميرا. أعد تحميل الصفحة.");
+        }
+      };
+      await peer.setRemoteDescription(offer);
+      if (pc !== peer) return;
+      remoteReady = true;
+      pendingCandidates.splice(0).forEach((c) => peer.addIceCandidate(c).catch(() => undefined));
+      const local = await peer.createAnswer();
+      await peer.setLocalDescription(local);
+      if (pc !== peer || cancelled) return;
+      await updateDoc(sessionRef, { answer: { type: local.type, sdp: local.sdp }, updatedAt: serverTimestamp() });
+    };
+
+    const watch = () => {
+      unsubs.push(
+        onSnapshot(
+          sessionRef,
+          (snap) => {
+            const data: DocumentData | undefined = snap.data();
+            if (!data || cancelled) return;
+            if (data.status === "ended") {
+              closePeer();
+              setStatus("ended");
+              return;
+            }
+            if (!requested) {
+              claim();
+              return;
+            }
+            const requester = (data.request?.viewerId as string | undefined) ?? null;
+            if (requester && requester !== viewerId) {
+              // A newer viewer (another tab or window) took over. Do not fight it.
+              closePeer();
+              setStatus("elsewhere");
+              return;
+            }
+            const offer = data.offer as Offer | null;
+            if (data.offerFor === viewerId && offer?.sdp && offer.sdp !== answeredSdp) {
+              setStatus("connecting");
+              answer(offer).catch((err: unknown) => {
+                if (!cancelled) {
+                  setStatus("error");
+                  setError(`تعذر الرد على اتصال الطالب: ${err instanceof Error ? err.message : "خطأ غير معروف"}`);
+                }
+              });
+            }
+          },
+          (err) => {
+            setStatus("error");
+            setError(
+              err.code === "permission-denied"
+                ? "لا تملك صلاحية مشاهدة هذه الجلسة. سجّل الخروج ثم الدخول من جديد بحساب المشرف."
+                : `تعذر قراءة الجلسة: ${err.code}`,
+            );
+          },
+        ),
+      );
+      unsubs.push(
+        onSnapshot(
+          collection(sessionRef, "studentCandidates"),
+          (snap) => {
+            snap.docChanges().forEach((change) => {
+              const data = change.doc.data() as RTCIceCandidateInit & { viewerId?: string };
+              if (change.type !== "added" || cancelled || data.viewerId !== viewerId) return;
+              if (pc && remoteReady) pc.addIceCandidate(toCandidate(data)).catch(() => undefined);
+              else pendingCandidates.push(toCandidate(data));
+            });
+          },
+          (err) => setError(`تعذر قراءة اتصال الطالب: ${err.code}`),
+        ),
+      );
+    };
+
+    // Wait for Firebase to restore the browser login, then refresh the ID token: the rules need the
+    // role claim, and a token issued before the claim was set would be denied.
     void (async () => {
-      // Wait for Firebase to restore the browser login. Subscribing earlier sends an unauthenticated read.
       const auth = getClientAuth();
       await auth.authStateReady();
       const user = auth.currentUser;
@@ -65,8 +173,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
         return;
       }
       await user.getIdToken(true);
-      if (cancelled) return;
-      unsub = attach(doc(getClientDb(), SESSION_COLLECTION, attemptId));
+      if (!cancelled) watch();
     })().catch((err: { code?: string }) => {
       setStatus("error");
       setError(`تعذر تحديث صلاحية الدخول: ${err.code ?? "unknown"}`);
@@ -74,87 +181,17 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
 
     return () => {
       cancelled = true;
-      unsub?.();
+      unsubs.forEach((u) => u());
+      closePeer();
     };
   }, [attemptId]);
-
-  // Answer each new offer.
-  const offerSdp = offer?.sdp ?? null;
-  useEffect(() => {
-    if (!offerSdp || !offer) return;
-    const db = getClientDb();
-    const sessionRef = doc(db, SESSION_COLLECTION, attemptId);
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-    const unsubs: (() => void)[] = [];
-    let closed = false;
-    pc.ontrack = (event) => {
-      if (videoRef.current) videoRef.current.srcObject = event.streams[0];
-    };
-    const remoteCandidates: RTCIceCandidateInit[] = [];
-    let remoteReady = false;
-    pc.onicecandidate = (event) => {
-      if (event.candidate && !closed) {
-        addDoc(collection(sessionRef, "adminCandidates"), event.candidate.toJSON()).catch((err: { code?: string }) =>
-          setError(`تعذر إرسال الاتصال: ${err.code ?? "unknown"}`),
-        );
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      // "Live" means media can actually flow, not just that a track was negotiated.
-      if (pc.connectionState === "connected") setStatus("live");
-      if (pc.connectionState === "failed") {
-        setStatus("error");
-        setError("فشل الاتصال بالكاميرا. أعد تحميل الصفحة.");
-      }
-    };
-
-    void (async () => {
-      try {
-        await pc.setRemoteDescription(offer);
-        remoteReady = true;
-        remoteCandidates.splice(0).forEach((c) => pc.addIceCandidate(c).catch(() => undefined));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await updateDoc(sessionRef, { answer: { type: answer.type, sdp: answer.sdp }, updatedAt: serverTimestamp() });
-      } catch (err) {
-        if (!closed) {
-          setStatus("error");
-          setError(`تعذر الرد على اتصال الطالب: ${err instanceof Error ? err.message : "خطأ غير معروف"}`);
-        }
-      }
-    })();
-
-    unsubs.push(
-      onSnapshot(
-        collection(sessionRef, "studentCandidates"),
-        (snap) => {
-          snap.docChanges().forEach((change) => {
-            if (change.type !== "added" || closed) return;
-            const candidate = change.doc.data() as RTCIceCandidateInit;
-            if (remoteReady) pc.addIceCandidate(candidate).catch(() => undefined);
-            else remoteCandidates.push(candidate);
-          });
-        },
-        (err) => {
-          setError(`تعذر قراءة اتصال الطالب: ${err.code}`);
-        },
-      ),
-    );
-
-    return () => {
-      closed = true;
-      unsubs.forEach((u) => u());
-      pc.close();
-    };
-    // Re-run only when the offer itself changes. Snapshots that change only the answer must not reconnect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offerSdp, attemptId]);
 
   const label: Record<Status, string> = {
     waiting: "بانتظار الاتصال",
     connecting: "جارٍ الاتصال",
     live: "مباشر",
     ended: "انتهت المتابعة",
+    elsewhere: "مفتوحة في نافذة أخرى",
     error: "خطأ",
   };
   const tone = status === "live" ? "success" : status === "error" ? "warning" : status === "ended" ? "neutral" : "primary";
@@ -165,6 +202,14 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
         <StatusBadge tone={tone}>{label[status]}</StatusBadge>
         <span className="text-xs text-muted-foreground">بث مباشر فقط، لا يُسجَّل</span>
       </div>
+      {status === "elsewhere" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm">
+          <span>الكاميرا معروضة الآن في نافذة أو صفحة أخرى.</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => claimRef.current()}>
+            اعرضها هنا
+          </Button>
+        </div>
+      )}
       {error && (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
           {error}
