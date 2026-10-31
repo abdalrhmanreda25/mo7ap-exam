@@ -166,7 +166,9 @@ describe("attempt engine (Firestore emulator)", () => {
     const hid = await startWithCode(db, STUDENT, hidden.examId);
     await attempts.submitAttempt(db, STUDENT, hid);
     const hiddenView = await attempts.getAttemptView(db, STUDENT, hid);
-    expect(hiddenView?.result?.correct).toBeNull();
+    // Nothing answered: every question shows its correct option, even with the policy off.
+    expect(hiddenView?.result?.correct?.[hidden.q1]).toBe("b");
+    expect(hiddenView?.result?.verdicts).toEqual({});
     expect(hiddenView?.result?.explanations).toBeNull();
 
     const shown = await publishedExam({ showCorrect: true, showExplanations: true });

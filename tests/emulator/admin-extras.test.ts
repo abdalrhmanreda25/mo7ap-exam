@@ -73,12 +73,22 @@ describe("admin extras (emulator)", () => {
     await attempts.saveAnswer(db, "rp-student", id, qid, "b", 1);
     await attempts.submitAttempt(db, "rp-student", id);
     const hidden = (await attempts.getAttemptView(db, "rp-student", id))!.result!;
-    expect(hidden.correct).toBeNull();
+    expect(hidden.correct).toEqual({});
     // Right or wrong is always shown, even when the correct option is hidden.
     expect(hidden.verdicts).toEqual({ [qid]: true });
 
     await exams.updateReviewPolicy(db, ADMIN, examId, { showScoreAfterSubmit: true, showCorrectAnswersAfterSubmit: true, showExplanationsAfterSubmit: false });
     expect((await attempts.getAttemptView(db, "rp-student", id))!.result!.correct?.[qid]).toBe("b");
+  });
+
+  it("a wrong or blank answer always shows the correct option, even when the policy hides correct answers", async () => {
+    const { examId, qid } = await setup();
+    const id = await startWithCode(db, "wrong-student", examId);
+    await attempts.saveAnswer(db, "wrong-student", id, qid, "a", 1);
+    await attempts.submitAttempt(db, "wrong-student", id);
+    const result = (await attempts.getAttemptView(db, "wrong-student", id))!.result!;
+    expect(result.verdicts).toEqual({ [qid]: false });
+    expect(result.correct).toEqual({ [qid]: "b" });
   });
 
   it("student stats count correct, wrong, blank per exam and per lesson", async () => {

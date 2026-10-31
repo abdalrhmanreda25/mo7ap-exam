@@ -49,7 +49,7 @@ export interface AttemptView {
     score: number | null;
     maxScore: number;
     percentage: number | null;
-    /** Present only when the exam's review policy allows it. */
+    /** Correct option per question. All questions when the review policy allows it, else only wrong or blank ones. */
     correct: Record<string, string> | null;
     /** Right (true) or wrong (false) per answered question. Always present; does not reveal the correct option. */
     verdicts: Record<string, boolean>;
@@ -330,10 +330,13 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
     let explanations: Record<string, string> | null = null;
     const keys = await db.collection(COLLECTIONS.examAnswerKeys).doc(examId).collection("items").get();
     const key = Object.fromEntries(keys.docs.map((d) => [d.id, d.data().correctOptionId as string]));
-    const correct = exam.showCorrectAnswersAfterSubmit ? key : null;
     const verdicts = Object.fromEntries(
       answersSnap.docs.map((d) => [d.id, d.data().selectedOptionId === key[d.id]]),
     );
+    // The policy can hide correct answers, but a wrong or blank answer always shows its correct option.
+    const correct = exam.showCorrectAnswersAfterSubmit
+      ? key
+      : Object.fromEntries(Object.entries(key).filter(([id]) => verdicts[id] !== true));
     if (exam.showExplanationsAfterSubmit) {
       explanations = Object.fromEntries(questions.map((q) => [q.examQuestionId, q.explanationAr || q.explanation]));
     }

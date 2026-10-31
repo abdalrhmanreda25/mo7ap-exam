@@ -277,8 +277,8 @@ function ResultPanel({ view, expired }: { view: AttemptView; expired: boolean })
           const right = result?.correct?.[q.examQuestionId];
           const correctIndex = right ? q.options.findIndex((o) => o.id === right) : null;
           const verdict = mine ? result?.verdicts[q.examQuestionId] : undefined;
-          const status = !mine ? "بدون إجابة" : verdict ? "إجابة صحيحة" : "إجابة خاطئة";
-          const tone = !mine ? "text-muted-foreground" : verdict ? "text-success" : "text-destructive";
+          const status = !mine ? "لم تُجب على هذا السؤال" : verdict ? "إجابة صحيحة" : "إجابة خاطئة";
+          const tone = !mine ? "text-warning" : verdict ? "text-success" : "text-destructive";
           return (
             <div key={q.examQuestionId} className="space-y-3">
               <p className="text-sm text-muted-foreground">
