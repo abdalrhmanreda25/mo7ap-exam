@@ -29,6 +29,17 @@ test.describe("Phase 1: authentication and route protection", () => {
     await expect(page).toHaveURL(/\/dashboard$/);
   });
 
+  test("site root sends visitors to login and signed-in users home", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByText("Your Name")).toHaveCount(0);
+
+    await signIn(page, ACCOUNTS.student.email, TEST_PASSWORD);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
+
   test("student is refused on admin area with the unauthorized page", async ({ page }) => {
     await signIn(page, ACCOUNTS.student.email, TEST_PASSWORD);
     await expect(page).toHaveURL(/\/dashboard$/);

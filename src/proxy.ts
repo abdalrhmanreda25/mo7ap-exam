@@ -10,10 +10,10 @@ export function proxy(request: NextRequest) {
   if (hasSession) return NextResponse.next();
 
   const loginUrl = new URL("/login", request.url);
-  loginUrl.searchParams.set("next", request.nextUrl.pathname);
+  if (request.nextUrl.pathname !== "/") loginUrl.searchParams.set("next", request.nextUrl.pathname);
   return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/exams/:path*", "/attempts/:path*"],
+  matcher: ["/", "/dashboard/:path*", "/admin/:path*", "/exams/:path*", "/attempts/:path*"],
 };
