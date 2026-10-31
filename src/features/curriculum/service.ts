@@ -6,7 +6,6 @@ import { DomainError } from "@/lib/server/errors";
 import type { ChapterInput, LessonInput, SubjectInput, SubjectInputArg } from "@/lib/validation/curriculum";
 import { gradeOf } from "@/lib/grades";
 import { COLLECTIONS } from "@/types/firestore";
-import { assertInWorkspace, inWorkspace, type Actor } from "@/lib/workspace";
 
 export interface SubjectDto extends SubjectInput {
   id: string;
@@ -20,8 +19,8 @@ export interface LessonDto extends LessonInput {
 
 const byOrder = <T extends { order: number }>(a: T, b: T) => a.order - b.order;
 
-export async function listSubjects(db: Firestore, workspaceId: string): Promise<SubjectDto[]> {
-  const snap = await db.collection(COLLECTIONS.subjects).where("workspaceId", "==", workspaceId).get();
+export async function listSubjects(db: Firestore): Promise<SubjectDto[]> {
+  const snap = await db.collection(COLLECTIONS.subjects).get();
   return snap.docs
     .map((doc) => {
       const d = doc.data();
@@ -42,13 +41,14 @@ export async function listSubjects(db: Firestore, workspaceId: string): Promise<
     .sort(byOrder);
 }
 
-export async function getSubject(db: Firestore, workspaceId: string, subjectId: string): Promise<SubjectDto | null> {
-  return (await listSubjects(db, workspaceId)).find((subject) => subject.id === subjectId) ?? null;
+export async function getSubject(db: Firestore, subjectId: string): Promise<SubjectDto | null> {
+  return (await listSubjects(db)).find((subject) => subject.id === subjectId) ?? null;
 }
 
-export async function listChapters(db: Firestore, workspaceId: string, subjectId?: string): Promise<ChapterDto[]> {
-  const scoped = db.collection(COLLECTIONS.chapters).where("workspaceId", "==", workspaceId);
-  const query = subjectId ? scoped.where("subjectId", "==", subjectId) : scoped;
+export async function listChapters(db: Firestore, subjectId?: string): Promise<ChapterDto[]> {
+  const query = subjectId
+    ? db.collection(COLLECTIONS.chapters).where("subjectId", "==", subjectId)
+    : db.collection(COLLECTIONS.chapters);
   const snap = await query.get();
   return snap.docs
     .map((doc) => {
@@ -66,9 +66,10 @@ export async function listChapters(db: Firestore, workspaceId: string, subjectId
     .sort(byOrder);
 }
 
-export async function listLessons(db: Firestore, workspaceId: string, chapterId?: string): Promise<LessonDto[]> {
-  const scoped = db.collection(COLLECTIONS.lessons).where("workspaceId", "==", workspaceId);
-  const query = chapterId ? scoped.where("chapterId", "==", chapterId) : scoped;
+export async function listLessons(db: Firestore, chapterId?: string): Promise<LessonDto[]> {
+  const query = chapterId
+    ? db.collection(COLLECTIONS.lessons).where("chapterId", "==", chapterId)
+    : db.collection(COLLECTIONS.lessons);
   const snap = await query.get();
   return snap.docs
     .map((doc) => {
@@ -86,18 +87,17 @@ export async function listLessons(db: Firestore, workspaceId: string, chapterId?
     .sort(byOrder);
 }
 
-/** Subject codes are unique within one teacher's space. */
-async function assertSlugAvailable(db: Firestore, workspaceId: string, slug: string, exceptId?: string) {
-  const snap = await db.collection(COLLECTIONS.subjects).where("workspaceId", "==", workspaceId).where("slug", "==", slug).get();
+async function assertSlugAvailable(db: Firestore, slug: string, exceptId?: string) {
+  const snap = await db.collection(COLLECTIONS.subjects).where("slug", "==", slug).get();
   if (snap.docs.some((doc) => doc.id !== exceptId)) {
     throw new DomainError("المعرّف المختصر مستخدم بالفعل لمادة أخرى.");
   }
 }
 
-export async function createSubject(db: Firestore, actor: Actor, input: SubjectInputArg): Promise<string> {
-  await assertSlugAvailable(db, actor.workspaceId, input.slug);
+export async function createSubject(db: Firestore, actorUid: string, input: SubjectInputArg): Promise<string> {
+  await assertSlugAvailable(db, input.slug);
   const ref = db.collection(COLLECTIONS.subjects).doc();
-  const audit = auditLogWrite(db, actor, {
+  const audit = auditLogWrite(db, actorUid, {
     action: "SUBJECT_CREATED",
     targetType: "subject",
     targetId: ref.id,
@@ -107,8 +107,7 @@ export async function createSubject(db: Firestore, actor: Actor, input: SubjectI
   batch.set(ref, {
     ...input,
     grade: gradeOf(input.grade),
-    workspaceId: actor.workspaceId,
-    createdBy: actor.uid,
+    createdBy: actorUid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -117,12 +116,13 @@ export async function createSubject(db: Firestore, actor: Actor, input: SubjectI
   return ref.id;
 }
 
-export async function updateSubject(db: Firestore, actor: Actor, subjectId: string, input: SubjectInputArg) {
+export async function updateSubject(db: Firestore, actorUid: string, subjectId: string, input: SubjectInputArg) {
   const ref = db.collection(COLLECTIONS.subjects).doc(subjectId);
-  assertInWorkspace((await ref.get()).data(), actor.workspaceId, "المادة غير موجودة.");
-  await assertSlugAvailable(db, actor.workspaceId, input.slug, subjectId);
+  const existing = await ref.get();
+  if (!existing.exists) throw new DomainError("المادة غير موجودة.");
+  await assertSlugAvailable(db, input.slug, subjectId);
 
-  const audit = auditLogWrite(db, actor, {
+  const audit = auditLogWrite(db, actorUid, {
     action: "SUBJECT_UPDATED",
     targetType: "subject",
     targetId: subjectId,
@@ -134,27 +134,26 @@ export async function updateSubject(db: Firestore, actor: Actor, subjectId: stri
   await batch.commit();
 }
 
-/** A subject of this space. Exported so other features can check a subject before using it. */
-export async function requireSubject(db: Firestore, workspaceId: string, subjectId: string) {
-  assertInWorkspace((await db.collection(COLLECTIONS.subjects).doc(subjectId).get()).data(), workspaceId, "المادة غير موجودة.");
+async function requireSubject(db: Firestore, subjectId: string) {
+  const snap = await db.collection(COLLECTIONS.subjects).doc(subjectId).get();
+  if (!snap.exists) throw new DomainError("المادة غير موجودة.");
 }
 
-async function requireChapterInSubject(db: Firestore, workspaceId: string, chapterId: string, subjectId: string) {
-  const data = (await db.collection(COLLECTIONS.chapters).doc(chapterId).get()).data();
-  if (!inWorkspace(data, workspaceId) || data?.subjectId !== subjectId) {
+async function requireChapterInSubject(db: Firestore, chapterId: string, subjectId: string) {
+  const snap = await db.collection(COLLECTIONS.chapters).doc(chapterId).get();
+  if (!snap.exists || snap.data()?.subjectId !== subjectId) {
     throw new DomainError("الفصل غير موجود ضمن هذه المادة.");
   }
 }
 
-export async function createChapter(db: Firestore, actor: Actor, input: ChapterInput): Promise<string> {
-  await requireSubject(db, actor.workspaceId, input.subjectId);
+export async function createChapter(db: Firestore, actorUid: string, input: ChapterInput): Promise<string> {
+  await requireSubject(db, input.subjectId);
   const ref = db.collection(COLLECTIONS.chapters).doc();
-  const audit = auditLogWrite(db, actor, { action: "CHAPTER_CREATED", targetType: "chapter", targetId: ref.id });
+  const audit = auditLogWrite(db, actorUid, { action: "CHAPTER_CREATED", targetType: "chapter", targetId: ref.id });
   const batch = db.batch();
   batch.set(ref, {
     ...input,
-    workspaceId: actor.workspaceId,
-    createdBy: actor.uid,
+    createdBy: actorUid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -163,29 +162,28 @@ export async function createChapter(db: Firestore, actor: Actor, input: ChapterI
   return ref.id;
 }
 
-export async function updateChapter(db: Firestore, actor: Actor, chapterId: string, input: ChapterInput) {
+export async function updateChapter(db: Firestore, actorUid: string, chapterId: string, input: ChapterInput) {
   const ref = db.collection(COLLECTIONS.chapters).doc(chapterId);
-  const existing = (await ref.get()).data();
-  assertInWorkspace(existing, actor.workspaceId, "الفصل غير موجود.");
-  if (existing.subjectId !== input.subjectId) {
+  const existing = await ref.get();
+  if (!existing.exists) throw new DomainError("الفصل غير موجود.");
+  if (existing.data()?.subjectId !== input.subjectId) {
     throw new DomainError("لا يمكن نقل الفصل إلى مادة أخرى.");
   }
-  const audit = auditLogWrite(db, actor, { action: "CHAPTER_UPDATED", targetType: "chapter", targetId: chapterId });
+  const audit = auditLogWrite(db, actorUid, { action: "CHAPTER_UPDATED", targetType: "chapter", targetId: chapterId });
   const batch = db.batch();
   batch.update(ref, { ...input, updatedAt: FieldValue.serverTimestamp() });
   batch.set(audit.ref, audit.data);
   await batch.commit();
 }
 
-export async function createLesson(db: Firestore, actor: Actor, input: LessonInput): Promise<string> {
-  await requireChapterInSubject(db, actor.workspaceId, input.chapterId, input.subjectId);
+export async function createLesson(db: Firestore, actorUid: string, input: LessonInput): Promise<string> {
+  await requireChapterInSubject(db, input.chapterId, input.subjectId);
   const ref = db.collection(COLLECTIONS.lessons).doc();
-  const audit = auditLogWrite(db, actor, { action: "LESSON_CREATED", targetType: "lesson", targetId: ref.id });
+  const audit = auditLogWrite(db, actorUid, { action: "LESSON_CREATED", targetType: "lesson", targetId: ref.id });
   const batch = db.batch();
   batch.set(ref, {
     ...input,
-    workspaceId: actor.workspaceId,
-    createdBy: actor.uid,
+    createdBy: actorUid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -194,14 +192,14 @@ export async function createLesson(db: Firestore, actor: Actor, input: LessonInp
   return ref.id;
 }
 
-export async function updateLesson(db: Firestore, actor: Actor, lessonId: string, input: LessonInput) {
+export async function updateLesson(db: Firestore, actorUid: string, lessonId: string, input: LessonInput) {
   const ref = db.collection(COLLECTIONS.lessons).doc(lessonId);
-  const existing = (await ref.get()).data();
-  assertInWorkspace(existing, actor.workspaceId, "الدرس غير موجود.");
-  if (existing.chapterId !== input.chapterId || existing.subjectId !== input.subjectId) {
+  const existing = await ref.get();
+  if (!existing.exists) throw new DomainError("الدرس غير موجود.");
+  if (existing.data()?.chapterId !== input.chapterId || existing.data()?.subjectId !== input.subjectId) {
     throw new DomainError("لا يمكن نقل الدرس إلى فصل آخر.");
   }
-  const audit = auditLogWrite(db, actor, { action: "LESSON_UPDATED", targetType: "lesson", targetId: lessonId });
+  const audit = auditLogWrite(db, actorUid, { action: "LESSON_UPDATED", targetType: "lesson", targetId: lessonId });
   const batch = db.batch();
   batch.update(ref, { ...input, updatedAt: FieldValue.serverTimestamp() });
   batch.set(audit.ref, audit.data);
