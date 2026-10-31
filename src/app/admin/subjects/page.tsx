@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listChapters, listSubjects } from "@/features/curriculum/service";
 import { ImportDialog } from "@/features/import/components/import-dialog";
+import { gradeLabel } from "@/lib/grades";
 
 export const metadata: Metadata = { title: "المواد والمنهج" };
 
@@ -60,7 +61,7 @@ async function SubjectsContent() {
                   <StatusBadge tone={subject.isActive ? "success" : "neutral"}>{subject.isActive ? "ظاهرة" : "مخفية"}</StatusBadge>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {subject.curriculum} · {subject.academicYear}
+                  {gradeLabel(subject.grade)} · {subject.curriculum}
                   {subject.applicableTracks.length > 0 && ` · ${subject.applicableTracks.join("، ")}`}
                 </p>
                 <p className="text-xs text-muted-foreground">{chapters.filter((c) => c.subjectId === subject.id).length} فصل</p>

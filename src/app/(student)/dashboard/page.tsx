@@ -10,6 +10,8 @@ import { requireRole } from "@/lib/auth/session";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listSubjects, listChapters } from "@/features/curriculum/service";
 import { listPublishedExams } from "@/features/attempts/service";
+import { getStudentGrade } from "@/features/students/service";
+import { gradeLabel } from "@/lib/grades";
 
 export const metadata: Metadata = { title: "لوحة الطالب" };
 
@@ -25,15 +27,16 @@ async function DashboardContent() {
   await connection();
   const user = await requireRole("STUDENT");
   const db = getAdminDb();
+  const grade = await getStudentGrade(db, user.uid);
 
   const [subjects, chapters, exams, resultsSnap] = await Promise.all([
     listSubjects(db),
     listChapters(db),
-    listPublishedExams(db),
+    listPublishedExams(db, grade),
     db.collection("results").where("studentId", "==", user.uid).get(),
   ]);
 
-  const activeSubjects = subjects.filter((s) => s.isActive);
+  const activeSubjects = subjects.filter((s) => s.isActive && s.grade === grade);
   // Results replaced by a reopened exam stay in history but do not count toward current stats.
   const results = resultsSnap.docs
     .map((d) => d.data() as { percentage: number; examId: string; superseded?: boolean })
@@ -53,7 +56,7 @@ async function DashboardContent() {
     <div className="space-y-10">
       <PageHeader
         title={`أهلًا${firstName ? ` ${firstName}` : ""}`}
-        description="هذه لوحتك: المواد المتاحة، والامتحانات، ونتائجك."
+        description={`${gradeLabel(grade)} · المواد المتاحة، والامتحانات، ونتائجك.`}
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 sm:gap-4">

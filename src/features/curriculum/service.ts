@@ -3,7 +3,8 @@ import "server-only";
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { auditLogWrite } from "@/lib/audit/log";
 import { DomainError } from "@/lib/server/errors";
-import type { ChapterInput, LessonInput, SubjectInput } from "@/lib/validation/curriculum";
+import type { ChapterInput, LessonInput, SubjectInput, SubjectInputArg } from "@/lib/validation/curriculum";
+import { gradeOf } from "@/lib/grades";
 import { COLLECTIONS } from "@/types/firestore";
 
 export interface SubjectDto extends SubjectInput {
@@ -31,6 +32,7 @@ export async function listSubjects(db: Firestore): Promise<SubjectDto[]> {
         description: d.description ?? "",
         academicYear: d.academicYear,
         curriculum: d.curriculum,
+        grade: gradeOf(d.grade),
         applicableTracks: d.applicableTracks ?? [],
         order: d.order,
         isActive: d.isActive,
@@ -92,7 +94,7 @@ async function assertSlugAvailable(db: Firestore, slug: string, exceptId?: strin
   }
 }
 
-export async function createSubject(db: Firestore, actorUid: string, input: SubjectInput): Promise<string> {
+export async function createSubject(db: Firestore, actorUid: string, input: SubjectInputArg): Promise<string> {
   await assertSlugAvailable(db, input.slug);
   const ref = db.collection(COLLECTIONS.subjects).doc();
   const audit = auditLogWrite(db, actorUid, {
@@ -104,6 +106,7 @@ export async function createSubject(db: Firestore, actorUid: string, input: Subj
   const batch = db.batch();
   batch.set(ref, {
     ...input,
+    grade: gradeOf(input.grade),
     createdBy: actorUid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -113,7 +116,7 @@ export async function createSubject(db: Firestore, actorUid: string, input: Subj
   return ref.id;
 }
 
-export async function updateSubject(db: Firestore, actorUid: string, subjectId: string, input: SubjectInput) {
+export async function updateSubject(db: Firestore, actorUid: string, subjectId: string, input: SubjectInputArg) {
   const ref = db.collection(COLLECTIONS.subjects).doc(subjectId);
   const existing = await ref.get();
   if (!existing.exists) throw new DomainError("المادة غير موجودة.");
@@ -126,7 +129,7 @@ export async function updateSubject(db: Firestore, actorUid: string, subjectId: 
     metadata: { isActive: input.isActive },
   });
   const batch = db.batch();
-  batch.update(ref, { ...input, updatedAt: FieldValue.serverTimestamp() });
+  batch.update(ref, { ...input, grade: gradeOf(input.grade), updatedAt: FieldValue.serverTimestamp() });
   batch.set(audit.ref, audit.data);
   await batch.commit();
 }

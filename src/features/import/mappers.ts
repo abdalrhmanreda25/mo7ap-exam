@@ -86,6 +86,7 @@ export function mapSubjects(rows: ImportRow[]): RowOutcome<SubjectInput>[] {
         description: v.description ?? "",
         academicYear: v.academicyear,
         curriculum: v.curriculum,
+        grade: v.grade || undefined,
         applicableTracks: (v.tracks ?? "").split(/[,،;]/).map((t) => t.trim()).filter(Boolean),
         order: int(v.order, index + 1),
         isActive: bool(v.isactive, true),

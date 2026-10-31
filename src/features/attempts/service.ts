@@ -3,6 +3,7 @@ import "server-only";
 import { randomInt } from "node:crypto";
 import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { normalizeAccessCode } from "@/lib/domain/access-code";
+import { gradeOf, type GradeId } from "@/lib/grades";
 import { attemptIdFor, resultIdFor } from "@/lib/domain/ids";
 import { canTransitionAttempt, decideAnswerSave, decideStart, isDeadlinePassed } from "@/lib/domain/state";
 import { DomainError } from "@/lib/server/errors";
@@ -67,6 +68,7 @@ interface ExamDoc {
   showCorrectAnswersAfterSubmit: boolean;
   showExplanationsAfterSubmit: boolean;
   version: number;
+  grade?: string;
   subjectId: string;
   description?: string;
   questionCount: number;
@@ -103,6 +105,9 @@ export async function startExam(db: Firestore, studentId: string, examId: string
     if (!decision.allowed) {
       throw new DomainError(decision.reason === "EXAM_ARCHIVED" ? "هذا الامتحان مؤرشف." : "هذا الامتحان غير متاح الآن.");
     }
+
+    const studentSnap = await tx.get(db.collection(COLLECTIONS.users).doc(studentId));
+    if (gradeOf(studentSnap.data()?.grade) !== gradeOf(exam.grade)) throw new DomainError("هذا الامتحان ليس لصفك.");
 
     // Only a new start needs the code. Resuming an attempt (refresh, reopened tab) returned above.
     const codeSnap = await tx.get(codeRef);
@@ -355,9 +360,11 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
   };
 }
 
-export async function listPublishedExams(db: Firestore) {
+/** Published exams of one school year. */
+export async function listPublishedExams(db: Firestore, grade: GradeId) {
   const snap = await db.collection(COLLECTIONS.exams).where("status", "==", "PUBLISHED").get();
   return snap.docs
+    .filter((doc) => gradeOf(doc.data().grade) === grade)
     .map((doc) => ({
       id: doc.id,
       titleAr: doc.data().titleAr as string,
@@ -369,11 +376,12 @@ export async function listPublishedExams(db: Firestore) {
     .sort((a, b) => a.titleAr.localeCompare(b.titleAr, "ar"));
 }
 
-export async function getExamForStudent(db: Firestore, examId: string) {
+/** A published exam the student may see: another year's exam reads as missing. */
+export async function getExamForStudent(db: Firestore, examId: string, grade: GradeId) {
   const snap = await db.collection(COLLECTIONS.exams).doc(examId).get();
   if (!snap.exists) return null;
   const exam = snap.data() as ExamDoc & { description?: string; questionCount: number };
-  if (exam.status !== "PUBLISHED" || exam.archived) return null;
+  if (exam.status !== "PUBLISHED" || exam.archived || gradeOf(exam.grade) !== grade) return null;
   return { ...exam, id: snap.id, description: exam.description ?? "" };
 }
 

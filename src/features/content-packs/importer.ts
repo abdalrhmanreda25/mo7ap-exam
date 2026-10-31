@@ -3,6 +3,7 @@ import * as curriculum from "@/features/curriculum/service";
 import * as questions from "@/features/questions/service";
 import * as exams from "@/features/exams/service";
 import { COLLECTIONS } from "@/types/firestore";
+import type { GradeId } from "@/lib/grades";
 
 /** Shape of content/*.json: one chapter, its lessons, and a ready exam of single-choice questions. */
 export interface ContentPack {
@@ -14,6 +15,8 @@ export interface ContentPack {
     title: string;
     descriptionAr?: string;
     difficulty?: "EASY" | "MEDIUM" | "HARD";
+    /** School year; defaults to DEFAULT_GRADE. */
+    grade?: GradeId;
     durationMinutes: number;
     pointsPerQuestion: number;
   };
@@ -133,6 +136,7 @@ export async function importContentPack(
     chapterIds: [chapterId],
     lessonIds: [],
     academicYear: "الثانوية العامة",
+    grade: pack.exam.grade,
     durationSeconds: pack.exam.durationMinutes * 60,
     shuffleQuestions: true,
     shuffleOptions: true,

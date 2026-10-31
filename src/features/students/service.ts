@@ -6,12 +6,14 @@ import { auditLogWrite } from "@/lib/audit/log";
 import { DomainError } from "@/lib/server/errors";
 import { COLLECTIONS, type AttemptStatus } from "@/types/firestore";
 import { settleExpiredAttempts } from "@/features/attempts/service";
+import { gradeOf, type GradeId } from "@/lib/grades";
 
 export interface StudentRow {
   uid: string;
   displayName: string;
   email: string;
   isActive: boolean;
+  grade: GradeId;
   attempts: number;
   completed: number;
   inProgress: number;
@@ -54,6 +56,7 @@ export async function listStudents(db: Firestore): Promise<StudentRow[]> {
         displayName: d.displayName ?? "",
         email: d.email ?? "",
         isActive: d.isActive === true,
+        grade: gradeOf(d.grade),
         attempts: counts.total,
         completed: counts.completed,
         inProgress: counts.inProgress,
@@ -66,7 +69,59 @@ export async function getStudent(db: Firestore, uid: string) {
   const snap = await db.collection(COLLECTIONS.users).doc(uid).get();
   if (!snap.exists || snap.data()!.role !== "STUDENT") return null;
   const d = snap.data()!;
-  return { uid, displayName: d.displayName ?? "", email: d.email ?? "", isActive: d.isActive === true };
+  return { uid, displayName: d.displayName ?? "", email: d.email ?? "", isActive: d.isActive === true, grade: gradeOf(d.grade) };
+}
+
+/** The student's school year. A student without a profile year is third secondary. */
+export async function getStudentGrade(db: Firestore, uid: string): Promise<GradeId> {
+  return gradeOf((await db.collection(COLLECTIONS.users).doc(uid).get()).data()?.grade);
+}
+
+/** Admin adds a student account with a password and a school year. */
+export async function createStudent(
+  db: Firestore,
+  actorUid: string,
+  input: { displayName: string; email: string; password: string; grade: GradeId },
+): Promise<string> {
+  const auth = getAdminAuth();
+  const email = input.email.trim().toLowerCase();
+  let uid: string;
+  try {
+    uid = (await auth.createUser({ email, password: input.password, displayName: input.displayName })).uid;
+  } catch (error) {
+    throw accountError(error);
+  }
+  await auth.setCustomUserClaims(uid, { role: "STUDENT" });
+
+  const audit = auditLogWrite(db, actorUid, {
+    action: "STUDENT_CREATED",
+    targetType: "user",
+    targetId: uid,
+    // Never log the password itself.
+    metadata: { email, grade: input.grade },
+  });
+  const batch = db.batch();
+  batch.set(db.collection(COLLECTIONS.users).doc(uid), {
+    uid,
+    displayName: input.displayName,
+    email,
+    role: "STUDENT",
+    isActive: true,
+    grade: input.grade,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.set(audit.ref, audit.data);
+  await batch.commit();
+  return uid;
+}
+
+function accountError(error: unknown): unknown {
+  const code = (error as { code?: string }).code ?? "";
+  if (code.includes("email-already-exists")) return new DomainError("هذا البريد مستخدم لحساب آخر.");
+  if (code.includes("invalid-password")) return new DomainError("كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
+  if (code.includes("invalid-email")) return new DomainError("البريد الإلكتروني غير صالح.");
+  return error;
 }
 
 export async function listStudentAttempts(db: Firestore, uid: string): Promise<StudentAttemptRow[]> {
@@ -324,7 +379,7 @@ export async function updateStudent(
   db: Firestore,
   actorUid: string,
   uid: string,
-  input: { displayName: string; email: string; password?: string },
+  input: { displayName: string; email: string; password?: string; grade?: GradeId },
 ) {
   const student = await getStudent(db, uid);
   if (!student) throw new DomainError("الطالب غير موجود.");
@@ -337,10 +392,7 @@ export async function updateStudent(
       ...(input.password ? { password: input.password } : {}),
     });
   } catch (error) {
-    const code = (error as { code?: string }).code ?? "";
-    if (code.includes("email-already-exists")) throw new DomainError("هذا البريد مستخدم لحساب آخر.");
-    if (code.includes("invalid-password")) throw new DomainError("كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
-    throw error;
+    throw accountError(error);
   }
   if (input.password) await auth.revokeRefreshTokens(uid);
 
@@ -349,10 +401,20 @@ export async function updateStudent(
     targetType: "user",
     targetId: uid,
     // Never log the password itself.
-    metadata: { emailChanged: email !== student.email, nameChanged: input.displayName !== student.displayName, passwordChanged: Boolean(input.password) },
+    metadata: {
+      emailChanged: email !== student.email,
+      nameChanged: input.displayName !== student.displayName,
+      passwordChanged: Boolean(input.password),
+      grade: input.grade ?? student.grade,
+    },
   });
   const batch = db.batch();
-  batch.update(db.collection(COLLECTIONS.users).doc(uid), { displayName: input.displayName, email, updatedAt: FieldValue.serverTimestamp() });
+  batch.update(db.collection(COLLECTIONS.users).doc(uid), {
+    displayName: input.displayName,
+    email,
+    grade: input.grade ?? student.grade,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
   batch.set(audit.ref, audit.data);
   await batch.commit();
 }

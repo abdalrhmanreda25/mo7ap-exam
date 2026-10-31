@@ -8,6 +8,8 @@ import { PageHeader, StatusBadge } from "@/components/layout/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listStudents } from "@/features/students/service";
+import { AddStudentForm } from "@/features/students/components/add-student-form";
+import { gradeLabel } from "@/lib/grades";
 
 export const metadata: Metadata = { title: "الطلاب" };
 
@@ -15,9 +17,12 @@ export default function StudentsPage() {
   return (
     <>
       <PageHeader title="الطلاب" description="كل الطلاب، وحالة الحساب، والامتحانات التي أدوها." />
-      <Suspense fallback={<Skeleton className="h-64 w-full rounded-2xl" />}>
-        <StudentsList />
-      </Suspense>
+      <div className="space-y-6">
+        <AddStudentForm />
+        <Suspense fallback={<Skeleton className="h-64 w-full rounded-2xl" />}>
+          <StudentsList />
+        </Suspense>
+      </div>
     </>
   );
 }
@@ -26,7 +31,7 @@ async function StudentsList() {
   await connection();
   const students = await listStudents(getAdminDb());
   if (students.length === 0) {
-    return <EmptyState icon={Users} title="لا يوجد طلاب" description="أنشئ حساب طالب من سطر الأوامر الإداري." />;
+    return <EmptyState icon={Users} title="لا يوجد طلاب" description="أضف أول طالب من «إضافة طالب» بالأعلى." />;
   }
   return (
     <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -41,7 +46,7 @@ async function StudentsList() {
               <StatusBadge tone={s.isActive ? "success" : "neutral"}>{s.isActive ? "نشط" : "موقوف"}</StatusBadge>
             </div>
             <p className="text-sm text-muted-foreground">
-              {s.completed} مكتمل · {s.inProgress} جارٍ
+              {gradeLabel(s.grade)} · {s.completed} مكتمل · {s.inProgress} جارٍ
             </p>
           </Link>
         </li>

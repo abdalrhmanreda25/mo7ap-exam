@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { runAdminAction } from "@/lib/server/action";
 import * as service from "./service";
+import { GRADE_IDS } from "@/lib/grades";
 
 const db = () => getAdminDb();
 const idSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/, { error: "معرّف غير صالح." });
@@ -30,7 +31,16 @@ const updateSchema = z.object({
   displayName: z.string().trim().min(1, { error: "الاسم مطلوب." }).max(120),
   email: z.string().trim().pipe(z.email({ error: "بريد غير صالح." })),
   password: z.string().max(128).optional().refine((v) => !v || v.length >= 6, { error: "كلمة المرور 6 أحرف على الأقل." }),
+  grade: z.enum(GRADE_IDS, { error: "اختر الصف." }),
 });
+
+const createSchema = updateSchema.extend({
+  password: z.string().min(6, { error: "كلمة المرور 6 أحرف على الأقل." }).max(128),
+});
+
+export async function createStudentAction(input: unknown) {
+  return runAdminAction(async (actor) => ({ uid: await service.createStudent(db(), actor, createSchema.parse(input)) }));
+}
 
 export async function updateStudentAction(uid: string, input: unknown) {
   return runAdminAction(async (actor) => {

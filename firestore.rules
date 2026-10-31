@@ -356,20 +356,22 @@ service cloud.firestore {
       return isStudent() && get(/databases/$(database)/documents/monitorSessions/$(sessionId)).data.studentId == request.auth.uid;
     }
 
+    // Each admin viewer writes request.viewerId; the student answers with a fresh offer whose
+    // offerFor names that viewer. Leaving and returning to the monitor page reconnects this way.
     match /monitorSessions/{attemptId} {
       allow read: if isAdmin() || (isStudent() && resource.data.studentId == request.auth.uid);
 
       allow create: if isStudent()
         && request.resource.data.studentId == request.auth.uid
-        && request.resource.data.keys().hasOnly(['studentId', 'offer', 'answer', 'status', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['studentId', 'offer', 'offerFor', 'answer', 'status', 'updatedAt'])
         && request.resource.data.answer == null
         && request.resource.data.status == 'live';
 
       allow update: if (isStudent() && resource.data.studentId == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['offer', 'answer', 'status', 'updatedAt'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['offer', 'offerFor', 'answer', 'status', 'updatedAt'])
             && request.resource.data.answer == null)
         || (isAdmin()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'updatedAt'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'request', 'updatedAt'])
             && resource.data.offer != null);
 
       allow delete: if false;

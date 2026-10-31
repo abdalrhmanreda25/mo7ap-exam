@@ -12,6 +12,7 @@ import { reportResult } from "@/lib/client/result";
 import { DEFAULT_REVIEW_POLICY, examConfigSchema, MAX_DURATION_SECONDS, MIN_DURATION_SECONDS } from "@/lib/validation/exams";
 import { createExamAction, updateExamAction } from "../actions";
 import type { ExamDto } from "../service";
+import { DEFAULT_GRADE, GRADE_IDS, GRADES } from "@/lib/grades";
 
 const formSchema = z.object({
   title: z.string().trim().min(1, { error: "العنوان بالإنجليزية مطلوب." }).max(200),
@@ -19,6 +20,7 @@ const formSchema = z.object({
   description: z.string().max(2000),
   subjectId: z.string().min(1, { error: "اختر المادة." }),
   academicYear: z.string().trim().min(1, { error: "السنة الدراسية مطلوبة." }).max(40),
+  grade: z.enum(GRADE_IDS),
   durationMinutes: z
     .number({ error: "أدخل المدة بالدقائق." })
     .int({ error: "المدة يجب أن تكون عددًا صحيحًا من الدقائق." })
@@ -55,6 +57,7 @@ export function ExamConfigForm({
       description: exam?.description ?? "",
       subjectId: exam?.subjectId ?? "",
       academicYear: exam?.academicYear ?? "",
+      grade: exam?.grade ?? DEFAULT_GRADE,
       durationMinutes: exam ? exam.durationSeconds / 60 : 30,
       shuffleQuestions: exam?.shuffleQuestions ?? true,
       shuffleOptions: exam?.shuffleOptions ?? false,
@@ -107,6 +110,15 @@ export function ExamConfigForm({
               {subjects.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nameAr}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="grade" label="الصف" hint="الامتحان يظهر لطلاب هذا الصف فقط.">
+            <select id="grade" className={inputClass} disabled={disabled} {...register("grade")}>
+              {GRADES.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.labelAr}
                 </option>
               ))}
             </select>

@@ -11,6 +11,7 @@ import { reportResult } from "@/lib/client/result";
 import { subjectInputSchema } from "@/lib/validation/curriculum";
 import { createSubjectAction, updateSubjectAction } from "../actions";
 import type { SubjectDto } from "../service";
+import { DEFAULT_GRADE, GRADES } from "@/lib/grades";
 
 const formSchema = subjectInputSchema.omit({ applicableTracks: true, description: true, name: true }).extend({
   name: z.string().max(120),
@@ -35,6 +36,7 @@ export function SubjectForm({ subject }: { subject?: SubjectDto }) {
       slug: subject?.slug ?? "",
       description: subject?.description ?? "",
       academicYear: subject?.academicYear ?? "",
+      grade: subject?.grade ?? DEFAULT_GRADE,
       curriculum: subject?.curriculum ?? "",
       tracksText: subject?.applicableTracks.join("، ") ?? "",
       order: subject?.order ?? 1,
@@ -76,6 +78,15 @@ export function SubjectForm({ subject }: { subject?: SubjectDto }) {
           </Field>
           <Field id="order" label="الترتيب" error={errors.order?.message}>
             <input id="order" type="number" min={0} className={inputClass} aria-invalid={Boolean(errors.order)} {...register("order", { valueAsNumber: true })} />
+          </Field>
+          <Field id="grade" label="الصف" hint="المادة تظهر لطلاب هذا الصف فقط.">
+            <select id="grade" className={inputClass} {...register("grade")}>
+              {GRADES.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.labelAr}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field id="academicYear" label="السنة الدراسية" error={errors.academicYear?.message}>
             <input id="academicYear" className={inputClass} aria-invalid={Boolean(errors.academicYear)} {...register("academicYear")} />

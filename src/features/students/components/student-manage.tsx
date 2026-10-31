@@ -9,12 +9,14 @@ import { Field, FormSection } from "@/components/forms/field";
 import { inputClass } from "@/components/forms/styles";
 import { reportResult } from "@/lib/client/result";
 import { deleteStudentAction, studentPasswordLinkAction, updateStudentAction } from "../actions";
+import { GRADES, type GradeId } from "@/lib/grades";
 
-export function StudentEditForm({ uid, displayName, email }: { uid: string; displayName: string; email: string }) {
+export function StudentEditForm({ uid, displayName, email, grade }: { uid: string; displayName: string; email: string; grade: GradeId }) {
   const router = useRouter();
   const [name, setName] = useState(displayName);
   const [mail, setMail] = useState(email);
   const [password, setPassword] = useState("");
+  const [year, setYear] = useState<GradeId>(grade);
   const [pending, start] = useTransition();
   const [link, setLink] = useState<string | null>(null);
 
@@ -26,6 +28,9 @@ export function StudentEditForm({ uid, displayName, email }: { uid: string; disp
         </Field>
         <Field id="student-email" label="البريد الإلكتروني">
           <input id="student-email" dir="ltr" type="email" className={inputClass} value={mail} onChange={(e) => setMail(e.target.value)} />
+        </Field>
+        <Field id="student-grade" label="الصف" hint="الطالب يرى امتحانات صفه فقط.">
+          <GradeSelect id="student-grade" value={year} onChange={setYear} />
         </Field>
         <Field id="student-password" label="كلمة مرور جديدة (اختياري)" hint="اتركها فارغة لعدم التغيير. 6 أحرف على الأقل.">
           <input
@@ -46,7 +51,7 @@ export function StudentEditForm({ uid, displayName, email }: { uid: string; disp
           onClick={() =>
             start(async () => {
               const ok = reportResult(
-                await updateStudentAction(uid, { displayName: name, email: mail, password: password || undefined }),
+                await updateStudentAction(uid, { displayName: name, email: mail, password: password || undefined, grade: year }),
                 "تم حفظ بيانات الطالب.",
               );
               if (ok) {
@@ -108,5 +113,17 @@ export function DeleteStudentButton({ uid, disabled }: { uid: string; disabled: 
         if (reportResult(await deleteStudentAction(uid), "تم حذف الطالب.")) router.push("/admin/students");
       }}
     />
+  );
+}
+
+export function GradeSelect({ id, value, onChange }: { id: string; value: GradeId; onChange: (grade: GradeId) => void }) {
+  return (
+    <select id={id} className={inputClass} value={value} onChange={(e) => onChange(e.target.value as GradeId)}>
+      {GRADES.map((g) => (
+        <option key={g.id} value={g.id}>
+          {g.labelAr}
+        </option>
+      ))}
+    </select>
   );
 }

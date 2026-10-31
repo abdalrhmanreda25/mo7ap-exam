@@ -507,5 +507,35 @@ describe("camera signaling (monitorSessions)", () => {
     });
     await assertSucceeds(write());
   });
+
+  it("a returning viewer asks for a fresh offer, and the student answers it for that viewer", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "monitorSessions", "rejoin"), { studentId: STUDENT, offer, offerFor: null, answer, status: "live", updatedAt: ts() });
+    });
+    const request = { viewerId: "viewer-2", at: serverTimestamp() };
+    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "rejoin"), { request, updatedAt: serverTimestamp() }));
+    // Only an admin asks for a viewer.
+    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "rejoin"), { request, updatedAt: serverTimestamp() }));
+    // The student's merge write for the new offer keeps the admin's request untouched.
+    await assertSucceeds(
+      setDoc(
+        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "rejoin"),
+        { studentId: STUDENT, offer, offerFor: "viewer-2", answer: null, status: "live", updatedAt: serverTimestamp() },
+        { merge: true },
+      ),
+    );
+    // Admin still cannot rewrite the offer.
+    await assertFails(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "rejoin"), { offer: { type: "offer", sdp: "forged" }, updatedAt: serverTimestamp() }));
+  });
+
+  it("a brand-new session created with a merge write names no viewer yet", async () => {
+    await assertSucceeds(
+      setDoc(
+        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "fresh-merge"),
+        { studentId: STUDENT, offer, offerFor: null, answer: null, status: "live", updatedAt: serverTimestamp() },
+        { merge: true },
+      ),
+    );
+  });
 });
 

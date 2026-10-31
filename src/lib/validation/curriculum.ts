@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_GRADE, GRADE_IDS } from "@/lib/grades";
 
 /** Shared text rules. Limits protect Firestore documents and the UI. */
 const text = (max: number) => z.string().trim().min(1).max(max);
@@ -19,11 +20,14 @@ export const subjectInputSchema = z.object({
   description: optionalText(1000),
   academicYear: text(40),
   curriculum: text(80),
+  grade: z.enum(GRADE_IDS).default(DEFAULT_GRADE),
   applicableTracks: z.array(text(60)).max(20),
   order,
   isActive: z.boolean(),
 });
 export type SubjectInput = z.infer<typeof subjectInputSchema>;
+/** What callers pass: the year may be left out and defaults to DEFAULT_GRADE. */
+export type SubjectInputArg = Omit<SubjectInput, "grade"> & { grade?: SubjectInput["grade"] };
 
 export const chapterInputSchema = z.object({
   subjectId: id,

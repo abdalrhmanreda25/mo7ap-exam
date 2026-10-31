@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EXAM_STATUSES } from "@/types/firestore";
+import { DEFAULT_GRADE, GRADE_IDS } from "@/lib/grades";
 
 export const MIN_DURATION_SECONDS = 60;
 export const MAX_DURATION_SECONDS = 6 * 60 * 60;
@@ -17,6 +18,7 @@ export const examConfigSchema = z.object({
   chapterIds: z.array(id).max(50).default([]),
   lessonIds: z.array(id).max(200).default([]),
   academicYear: z.string().trim().min(1).max(40),
+  grade: z.enum(GRADE_IDS).default(DEFAULT_GRADE),
   durationSeconds: z
     .number()
     .int()
@@ -29,6 +31,8 @@ export const examConfigSchema = z.object({
   showExplanationsAfterSubmit: z.boolean(),
 });
 export type ExamConfig = z.infer<typeof examConfigSchema>;
+/** What callers pass: the year may be left out and defaults to DEFAULT_GRADE. */
+export type ExamConfigInput = Omit<ExamConfig, "grade"> & { grade?: ExamConfig["grade"] };
 
 /** Review policy defaults: score visible, answers and explanations held back. */
 export const DEFAULT_REVIEW_POLICY = {

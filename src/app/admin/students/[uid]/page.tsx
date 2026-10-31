@@ -7,6 +7,7 @@ import { PageHeader, StatusBadge } from "@/components/layout/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { getStudent, getStudentStats, listStudentAttempts } from "@/features/students/service";
+import { gradeLabel } from "@/lib/grades";
 import { DeleteStudentButton, StudentEditForm } from "@/features/students/components/student-manage";
 import { ActiveToggle, ReopenAttemptButton } from "@/features/students/components/student-actions";
 
@@ -36,7 +37,7 @@ async function StudentContent({ params }: { params: Promise<{ uid: string }> }) 
     <>
       <PageHeader
         title={student.displayName || student.email}
-        description={student.email}
+        description={`${gradeLabel(student.grade)} · ${student.email}`}
         actions={
           <>
             <StatusBadge tone={student.isActive ? "success" : "neutral"}>{student.isActive ? "نشط" : "موقوف"}</StatusBadge>
@@ -164,7 +165,7 @@ async function StudentContent({ params }: { params: Promise<{ uid: string }> }) 
         </section>
       )}
       <div className="mt-10 space-y-6">
-        <StudentEditForm uid={student.uid} displayName={student.displayName} email={student.email} />
+        <StudentEditForm uid={student.uid} displayName={student.displayName} email={student.email} grade={student.grade} />
         <section className="space-y-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5">
           <h2 className="text-lg font-bold text-destructive">منطقة الخطر</h2>
           <p className="text-sm text-muted-foreground">

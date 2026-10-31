@@ -13,7 +13,8 @@ import { auditLogWrite } from "@/lib/audit/log";
 import { makeAccessCode } from "@/lib/domain/access-code";
 import { DomainError } from "@/lib/server/errors";
 import { canTransitionExam } from "@/lib/domain/state";
-import type { ExamConfig } from "@/lib/validation/exams";
+import type { ExamConfig, ExamConfigInput } from "@/lib/validation/exams";
+import { gradeOf } from "@/lib/grades";
 import { COLLECTIONS, type ExamStatus, type QuestionType } from "@/types/firestore";
 import {
   buildSnapshot,
@@ -56,11 +57,12 @@ const txReader = (tx: Transaction): Reader => ({
   query: (query) => tx.get(query),
 });
 
-const configFields = (config: ExamConfig) => ({
+const configFields = (config: ExamConfigInput) => ({
   title: config.title,
   titleAr: config.titleAr,
   description: config.description,
   academicYear: config.academicYear,
+  grade: gradeOf(config.grade),
   durationSeconds: config.durationSeconds,
   shuffleQuestions: config.shuffleQuestions,
   shuffleOptions: config.shuffleOptions,
@@ -77,6 +79,7 @@ function examDto(id: string, d: FirebaseFirestore.DocumentData): ExamDto {
     description: d.description ?? "",
     subjectId: d.subjectId,
     academicYear: d.academicYear,
+    grade: gradeOf(d.grade),
     durationSeconds: d.durationSeconds,
     shuffleQuestions: d.shuffleQuestions,
     shuffleOptions: d.shuffleOptions,
@@ -183,7 +186,7 @@ function totalsPatch(items: CompositionView[]) {
   };
 }
 
-export async function createDraftExam(db: Firestore, actorUid: string, config: ExamConfig): Promise<string> {
+export async function createDraftExam(db: Firestore, actorUid: string, config: ExamConfigInput): Promise<string> {
   const subject = await db.collection(COLLECTIONS.subjects).doc(config.subjectId).get();
   if (!subject.exists) throw new DomainError("المادة غير موجودة.");
 
@@ -211,7 +214,7 @@ export async function createDraftExam(db: Firestore, actorUid: string, config: E
   return ref.id;
 }
 
-export async function updateDraftExam(db: Firestore, actorUid: string, examId: string, config: ExamConfig) {
+export async function updateDraftExam(db: Firestore, actorUid: string, examId: string, config: ExamConfigInput) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
     const exam = await requireExamStatus(tx, examRef, "DRAFT");
@@ -559,6 +562,7 @@ export async function cloneExam(db: Firestore, actorUid: string, examId: string)
     chapterIds: source.chapterIds,
     lessonIds: source.lessonIds,
     academicYear: source.academicYear,
+    grade: source.grade,
     durationSeconds: source.durationSeconds,
     shuffleQuestions: source.shuffleQuestions,
     shuffleOptions: source.shuffleOptions,

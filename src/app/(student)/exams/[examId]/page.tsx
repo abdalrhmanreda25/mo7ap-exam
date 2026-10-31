@@ -10,6 +10,7 @@ import { requireRole } from "@/lib/auth/session";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { getAttemptIdState, getExamForStudent } from "@/features/attempts/service";
 import { StartExamButton } from "@/features/attempts/components/start-exam-button";
+import { getStudentGrade } from "@/features/students/service";
 
 export const metadata: Metadata = { title: "تفاصيل الامتحان" };
 
@@ -26,7 +27,7 @@ async function ExamInstructionsContent({ params }: { params: Promise<{ examId: s
   const { examId } = await params;
   const user = await requireRole("STUDENT");
   const db = getAdminDb();
-  const exam = await getExamForStudent(db, examId);
+  const exam = await getExamForStudent(db, examId, await getStudentGrade(db, user.uid));
   if (!exam) notFound();
   const attempt = await getAttemptIdState(db, user.uid, examId);
 

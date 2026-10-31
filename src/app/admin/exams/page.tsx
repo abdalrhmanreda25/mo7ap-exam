@@ -11,6 +11,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { listSubjects } from "@/features/curriculum/service";
 import { listExams } from "@/features/exams/service";
 import { EXAM_STATUS_AR } from "@/lib/labels";
+import { gradeLabel } from "@/lib/grades";
 import { CONTENT_PACKS } from "@/features/content-packs/packs";
 import { ReadyExams } from "@/features/content-packs/components/ready-exams";
 
@@ -95,7 +96,7 @@ function ExamList({ exams, subjectName }: { exams: Awaited<ReturnType<typeof lis
               </StatusBadge>
             </div>
             <p className="text-sm text-muted-foreground">
-              {subjectName.get(exam.subjectId) ?? "—"} · {Math.round(exam.durationSeconds / 60)} دقيقة · {exam.questionCount} سؤال · {exam.maxScore} درجة
+              {subjectName.get(exam.subjectId) ?? "—"} · {gradeLabel(exam.grade)} · {Math.round(exam.durationSeconds / 60)} دقيقة · {exam.questionCount} سؤال · {exam.maxScore} درجة
             </p>
           </Link>
         </li>

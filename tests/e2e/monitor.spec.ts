@@ -40,8 +40,21 @@ test.describe("Camera monitoring (live, no storage)", () => {
     await signIn(admin, ACCOUNTS.admin.email);
     await admin.goto("/admin/monitor");
     await admin.getByRole("link", { name: /اختبار سريع E2E/ }).first().click();
-    await expect(admin.getByText("مباشر")).toBeVisible({ timeout: 60000 });
+    await expect(admin.getByText("مباشر", { exact: true })).toBeVisible({ timeout: 60000 });
     await expect(student.getByText("متصل بالمشرف")).toBeVisible({ timeout: 30000 });
+    const viewerUrl = admin.url();
+
+    // Admin leaves the monitor for another tab of the site, then comes back: the feed reconnects.
+    await admin.getByRole("link", { name: "الطلاب" }).first().click();
+    await expect(admin).toHaveURL(/\/admin\/students$/);
+    await admin.goBack();
+    await expect(admin).toHaveURL(viewerUrl);
+    await expect(admin.getByText("مباشر", { exact: true })).toBeVisible({ timeout: 60000 });
+    await expect(student.getByText("متصل بالمشرف")).toBeVisible({ timeout: 30000 });
+
+    // The camera grid is another viewer of the same student and also goes live.
+    await admin.goto("/admin/monitor/all");
+    await expect(admin.getByText("مباشر", { exact: true }).first()).toBeVisible({ timeout: 60000 });
 
     await studentCtx.close();
     await adminCtx.close();
