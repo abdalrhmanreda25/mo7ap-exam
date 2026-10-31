@@ -14,7 +14,18 @@ type GateState = "asking" | "live" | "blocked";
  * Blocks the exam until camera access is granted, then streams the camera to the admin.
  * Lost or revoked camera blocks the exam again. The attempt timer keeps running.
  */
-export function CameraGate({ attemptId, studentId, children }: { attemptId: string; studentId: string; children: ReactNode }) {
+export function CameraGate({
+  attemptId,
+  studentId,
+  workspaceId,
+  children,
+}: {
+  attemptId: string;
+  studentId: string;
+  /** The teacher space; rules let only that teacher watch. */
+  workspaceId: string;
+  children: ReactNode;
+}) {
   const [state, setState] = useState<GateState>("asking");
   const [attempt, setAttempt] = useState(0);
   const [link, setLink] = useState<LinkState>("connecting");
@@ -48,10 +59,10 @@ export function CameraGate({ attemptId, studentId, children }: { attemptId: stri
     if (state !== "live" || !streamRef.current) return;
     const stream = streamRef.current;
     if (previewRef.current) previewRef.current.srcObject = stream;
-    const stop = startBroadcast(attemptId, studentId, stream, setLink);
+    const stop = startBroadcast(attemptId, studentId, workspaceId, stream, setLink);
     // Closing the connection does not stop the camera: a remount or reconnect reuses the same stream.
     return () => stop();
-  }, [state, attemptId, studentId]);
+  }, [state, attemptId, studentId, workspaceId]);
 
   // Release the camera when the gate goes away (exam finished or page left).
   useEffect(() => {
@@ -129,6 +140,7 @@ const toCandidate = ({ candidate, sdpMid, sdpMLineIndex, usernameFragment }: RTC
 function startBroadcast(
   attemptId: string,
   studentId: string,
+  workspaceId: string,
   stream: MediaStream,
   onLink: (state: LinkState) => void,
 ): () => void {
@@ -172,7 +184,7 @@ function startBroadcast(
     // create rule (new session) and the update rule (reconnect), and keeps the admin's request.
     await setDoc(
       sessionRef,
-      { studentId, offer: { type: offer.type, sdp: offer.sdp }, offerFor: viewerId, answer: null, status: "live", updatedAt: serverTimestamp() },
+      { studentId, workspaceId, offer: { type: offer.type, sdp: offer.sdp }, offerFor: viewerId, answer: null, status: "live", updatedAt: serverTimestamp() },
       { merge: true },
     );
     written = true;

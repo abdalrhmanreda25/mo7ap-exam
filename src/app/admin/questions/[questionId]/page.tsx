@@ -9,6 +9,7 @@ import { listChapters, listLessons, listSubjects } from "@/features/curriculum/s
 import { getQuestionDetail } from "@/features/questions/service";
 import { QuestionForm } from "@/features/questions/components/question-form";
 import { EXAM_STATUS_AR } from "@/lib/labels";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "تعديل السؤال" };
 
@@ -24,11 +25,12 @@ async function QuestionDetailContent({ params }: { params: Promise<{ questionId:
   await connection();
   const { questionId } = await params;
   const db = getAdminDb();
+  const { workspaceId: ws } = await requireAdmin();
   const [question, subjects, chapters, lessons] = await Promise.all([
-    getQuestionDetail(db, questionId),
-    listSubjects(db),
-    listChapters(db),
-    listLessons(db),
+    getQuestionDetail(db, ws, questionId),
+    listSubjects(db, ws),
+    listChapters(db, ws),
+    listLessons(db, ws),
   ]);
   if (!question) notFound();
 

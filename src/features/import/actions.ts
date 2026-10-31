@@ -4,6 +4,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { runAdminAction } from "@/lib/server/action";
 import { DomainError } from "@/lib/server/errors";
 import { COLLECTIONS } from "@/types/firestore";
+import type { Actor } from "@/lib/workspace";
 import { createChapter, createLesson, createSubject, listChapters, listLessons, listSubjects } from "@/features/curriculum/service";
 import { createQuestion } from "@/features/questions/service";
 import { addQuestionToExam, getExam } from "@/features/exams/service";
@@ -29,7 +30,7 @@ export interface ImportPreview {
 
 interface Analysis {
   rows: number;
-  valid: { line: number; value: unknown; write: (db: FirebaseFirestore.Firestore, actor: string) => Promise<unknown> }[];
+  valid: { line: number; value: unknown; write: (db: FirebaseFirestore.Firestore, actor: Actor) => Promise<unknown> }[];
   errors: string[];
 }
 
@@ -37,8 +38,8 @@ function fail(outcomes: RowOutcome<unknown>[]) {
   return outcomes.flatMap((o) => (o.ok ? [] : [`سطر ${o.line}: ${o.message}`]));
 }
 
-/** Parse, resolve references, validate every row. Writes nothing. */
-async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> {
+/** Parse, resolve references within the teacher's space, validate every row. Writes nothing. */
+async function analyze(kind: ImportKind, formData: FormData, workspaceId: string): Promise<Analysis> {
   const file = formData.get("file");
   if (!(file instanceof File)) throw new DomainError("اختر ملفًا أولًا.");
   if (!KINDS.includes(kind)) throw new DomainError("نوع الاستيراد غير معروف.");
@@ -50,7 +51,7 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
   const db = getAdminDb();
 
   if (kind === "subjects") {
-    const existing = new Set((await listSubjects(db)).map((s) => s.slug));
+    const existing = new Set((await listSubjects(db, workspaceId)).map((s) => s.slug));
     const outcomes = mapSubjects(rows);
     const seen = new Set<string>();
     const errors = fail(outcomes);
@@ -69,16 +70,16 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
   }
 
   if (kind === "chapters") {
-    const subjects = await listSubjects(db);
+    const subjects = await listSubjects(db, workspaceId);
     const idBySlug = new Map(subjects.map((s) => [s.slug, s.id]));
     const outcomes = mapChapters(rows, idBySlug);
     return bundle(rows.length, outcomes, (value) => (d, actor) => createChapter(d, actor, value));
   }
 
   if (kind === "lessons") {
-    const subjects = await listSubjects(db);
+    const subjects = await listSubjects(db, workspaceId);
     const slugById = new Map(subjects.map((s) => [s.id, s.slug]));
-    const chapters = await listChapters(db);
+    const chapters = await listChapters(db, workspaceId);
     const chapterByKey = new Map(
       chapters.map((c) => [`${slugById.get(c.subjectId)}|${c.titleAr}`, { id: c.id, subjectId: c.subjectId }]),
     );
@@ -87,10 +88,10 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
   }
 
   if (kind === "questions") {
-    const subjects = await listSubjects(db);
+    const subjects = await listSubjects(db, workspaceId);
     const slugById = new Map(subjects.map((s) => [s.id, s.slug]));
-    const chapters = await listChapters(db);
-    const lessons = await listLessons(db);
+    const chapters = await listChapters(db, workspaceId);
+    const lessons = await listLessons(db, workspaceId);
     const chapterById = new Map(chapters.map((c) => [c.id, c]));
     const subjectIdBySlug = new Map(subjects.map((s) => [s.slug, s.id]));
     const chapterByKey = new Map(chapters.map((c) => [`${slugById.get(c.subjectId)}|${c.titleAr}`, { id: c.id, subjectId: c.subjectId }]));
@@ -106,12 +107,13 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
 
   // examQuestions: needs examId and the exam's subject
   const examId = String(formData.get("examId") ?? "");
-  const exam = examId ? await getExam(db, examId) : null;
+  const exam = examId ? await getExam(db, workspaceId, examId) : null;
   if (!exam) throw new DomainError("الامتحان غير موجود.");
   if (exam.status !== "DRAFT") throw new DomainError("لا يمكن تعديل امتحان منشور.");
 
   const bankSnap = await db
     .collection(COLLECTIONS.questions)
+    .where("workspaceId", "==", workspaceId)
     .where("subjectId", "==", exam.subjectId)
     .where("status", "==", "READY")
     .get();
@@ -130,15 +132,15 @@ async function analyze(kind: ImportKind, formData: FormData): Promise<Analysis> 
 function bundle<T>(
   count: number,
   outcomes: RowOutcome<T>[],
-  writer: (value: T) => (db: FirebaseFirestore.Firestore, actor: string) => Promise<unknown>,
+  writer: (value: T) => (db: FirebaseFirestore.Firestore, actor: Actor) => Promise<unknown>,
 ): Analysis {
   const valid = outcomes.flatMap((o) => (o.ok ? [{ line: o.line, value: o.value, write: writer(o.value) }] : []));
   return { rows: count, valid, errors: fail(outcomes) };
 }
 
 export async function previewImportAction(kind: ImportKind, formData: FormData) {
-  return runAdminAction(async (): Promise<ImportPreview> => {
-    const analysis = await analyze(kind, formData);
+  return runAdminAction(async (actor): Promise<ImportPreview> => {
+    const analysis = await analyze(kind, formData, actor.workspaceId);
     return { kind, total: analysis.rows, valid: analysis.valid.length, errors: analysis.errors.slice(0, 100) };
   });
 }
@@ -149,7 +151,7 @@ export async function previewImportAction(kind: ImportKind, formData: FormData) 
  */
 export async function commitImportAction(kind: ImportKind, formData: FormData) {
   return runAdminAction(async (actor) => {
-    const analysis = await analyze(kind, formData);
+    const analysis = await analyze(kind, formData, actor.workspaceId);
     if (analysis.errors.length > 0) {
       throw new DomainError("توجد أخطاء في الملف، لم يُستورد شيء. صحّحها ثم أعد الرفع.", analysis.errors.slice(0, 20));
     }

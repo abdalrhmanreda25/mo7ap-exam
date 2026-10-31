@@ -11,6 +11,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { listChapters, listSubjects } from "@/features/curriculum/service";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 import { gradeLabel } from "@/lib/grades";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "المواد والمنهج" };
 
@@ -25,7 +26,8 @@ export default function SubjectsPage() {
 async function SubjectsContent() {
   await connection();
   const db = getAdminDb();
-  const [subjects, chapters] = await Promise.all([listSubjects(db), listChapters(db)]);
+  const { workspaceId: ws } = await requireAdmin();
+  const [subjects, chapters] = await Promise.all([listSubjects(db, ws), listChapters(db, ws)]);
 
   return (
     <>

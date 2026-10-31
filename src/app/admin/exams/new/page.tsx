@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listSubjects } from "@/features/curriculum/service";
 import { ExamConfigForm } from "@/features/exams/components/exam-config-form";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "امتحان جديد" };
 
@@ -22,6 +23,7 @@ export default function NewExamPage() {
 
 async function NewExamContent() {
   await connection();
-  const subjects = await listSubjects(getAdminDb());
+  const { workspaceId } = await requireAdmin();
+  const subjects = await listSubjects(getAdminDb(), workspaceId);
   return <ExamConfigForm subjects={subjects.filter((s) => s.isActive).map((s) => ({ id: s.id, nameAr: s.nameAr }))} />;
 }

@@ -12,7 +12,8 @@ const attempts = await import("@/features/attempts/service");
 const students = await import("@/features/students/service");
 
 const db = getAdminDb();
-const ADMIN = "test-admin";
+const ADMIN = { uid: "test-admin", workspaceId: "main" };
+const WS = ADMIN.workspaceId;
 const STUDENT = `student-${Date.now()}`;
 const OTHER = `other-${Date.now()}`;
 
@@ -134,11 +135,12 @@ describe("attempt engine (Firestore emulator)", () => {
   it("admin views finalize an expired attempt the student never came back to", async () => {
     const { examId, q1 } = await publishedExam();
     const student = `left-${Date.now()}`;
+    await db.collection("users").doc(student).set({ uid: student, role: "STUDENT", isActive: true, workspaceId: WS, displayName: "غائب", email: null });
     const id = await startWithCode(db, student, examId);
     await attempts.saveAnswer(db, student, id, q1, "b", 1);
     await db.collection("attempts").doc(id).update({ deadlineAt: Timestamp.fromMillis(Date.now() - 5000) });
 
-    const rows = await students.listStudentAttempts(db, student);
+    const rows = await students.listStudentAttempts(db, WS, student);
     expect(rows.find((r) => r.attemptId === id)).toMatchObject({ status: "GRADED", score: 2 });
     // No longer counted as running, so the admin can reopen it.
     expect(await students.reopenAttempt(db, ADMIN, id, "انتهى الوقت")).toBe(`${id}__v1`);

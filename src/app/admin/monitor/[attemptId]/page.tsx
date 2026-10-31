@@ -7,6 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/types/firestore";
 import { CameraViewer } from "@/features/monitor/components/camera-viewer";
+import { requireAdmin } from "@/lib/auth/session";
+import { inWorkspace } from "@/lib/workspace";
 
 export const metadata: Metadata = { title: "مراقبة الطالب" };
 
@@ -22,8 +24,9 @@ async function MonitorAttemptContent({ params }: { params: Promise<{ attemptId: 
   await connection();
   const { attemptId } = await params;
   const db = getAdminDb();
+  const { workspaceId } = await requireAdmin();
   const attempt = await db.collection(COLLECTIONS.attempts).doc(attemptId).get();
-  if (!attempt.exists) notFound();
+  if (!inWorkspace(attempt.data(), workspaceId)) notFound();
   const [user, exam] = await Promise.all([
     db.collection(COLLECTIONS.users).doc(attempt.data()!.studentId as string).get(),
     db.collection(COLLECTIONS.exams).doc(attempt.data()!.examId as string).get(),

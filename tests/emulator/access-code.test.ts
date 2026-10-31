@@ -9,7 +9,8 @@ const exams = await import("@/features/exams/service");
 const attempts = await import("@/features/attempts/service");
 
 const db = getAdminDb();
-const ADMIN = "test-admin";
+const ADMIN = { uid: "test-admin", workspaceId: "main" };
+const WS = ADMIN.workspaceId;
 
 async function publishedExam() {
   const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -45,7 +46,7 @@ describe("exam access codes (Firestore emulator)", () => {
 
   it("blocks starting until the admin generates a code", async () => {
     const examId = await publishedExam();
-    expect(await exams.getAccessCode(db, examId)).toBeNull();
+    expect(await exams.getAccessCode(db, WS, examId)).toBeNull();
     await expect(attempts.startExam(db, "code-s1", examId, "ABC234")).rejects.toThrow("لم يتم إنشاء كود");
     expect(await attemptExists(examId, "code-s1")).toBe(false);
   });
@@ -54,7 +55,7 @@ describe("exam access codes (Firestore emulator)", () => {
     const examId = await publishedExam();
     const code = await exams.generateAccessCode(db, ADMIN, examId);
     expect(code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
-    expect(await exams.getAccessCode(db, examId)).toBe(code);
+    expect(await exams.getAccessCode(db, WS, examId)).toBe(code);
 
     await expect(attempts.startExam(db, "code-s2", examId, "WRONG1")).rejects.toThrow("الكود غير صحيح");
     expect(await attemptExists(examId, "code-s2")).toBe(false);

@@ -13,7 +13,8 @@ const media = await import("@/features/media/service");
 const { provisionUser } = await import("@/lib/auth/provisioning");
 
 const db = getAdminDb();
-const ADMIN = "test-admin";
+const ADMIN = { uid: "test-admin", workspaceId: "main" };
+const WS = ADMIN.workspaceId;
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 async function setup() {
@@ -46,7 +47,7 @@ describe("admin extras (emulator)", () => {
   it("stores a question image and serves it back; rejects non-images and oversize", async () => {
     const url = await media.saveMedia(db, ADMIN, PNG);
     const id = url.split("/").pop()!;
-    const back = await media.readMedia(db, id);
+    const back = await media.readMedia(db, WS, id);
     expect(back?.mime).toBe("image/png");
     expect(() => media.parseDataUrl("data:text/html;base64,PGh0bWw+")).toThrow();
     const huge = "data:image/png;base64," + Buffer.alloc(600 * 1024).toString("base64");
@@ -61,7 +62,7 @@ describe("admin extras (emulator)", () => {
 
     const { id: cloneId, skipped } = await exams.cloneExam(db, ADMIN, examId);
     expect(skipped).toBe(0);
-    const clone = await exams.getExam(db, cloneId);
+    const clone = await exams.getExam(db, WS, cloneId);
     expect(clone).toMatchObject({ status: "DRAFT", questionCount: 1, maxScore: 2 });
     const cloned = await db.collection("exams").doc(cloneId).collection("questions").doc(qid).get();
     expect(cloned.data()!.questionSnapshot.mediaReferences).toEqual(["/figures/x.png"]);
@@ -94,12 +95,12 @@ describe("admin extras (emulator)", () => {
   it("student stats count correct, wrong, blank per exam and per lesson", async () => {
     const { examId, qid } = await setup();
     const email = `stats-${Date.now()}@example.test`;
-    const { uid } = await provisionUser({ email, displayName: "إحصاء", role: "STUDENT", actorUid: ADMIN });
+    const { uid } = await provisionUser({ email, displayName: "إحصاء", role: "STUDENT", actorUid: ADMIN.uid });
     const id = await startWithCode(db, uid, examId);
     await attempts.saveAnswer(db, uid, id, qid, "b", 1);
     await attempts.submitAttempt(db, uid, id);
 
-    const stats = await students.getStudentStats(db, uid);
+    const stats = await students.getStudentStats(db, WS, uid);
     expect(stats).toMatchObject({ completed: 1, averagePercentage: 100, totalCorrect: 1, totalWrong: 0, totalBlank: 0 });
     expect(stats.lessons[0]).toMatchObject({ titleAr: "درس أ", correct: 1, total: 1, percentage: 100 });
   });
@@ -107,7 +108,7 @@ describe("admin extras (emulator)", () => {
   it("edits a student (name, email, password) and deletes only when no exam is in progress", async () => {
     const { examId } = await setup();
     const email = `edit-${Date.now()}@example.test`;
-    const { uid } = await provisionUser({ email, displayName: "قديم", role: "STUDENT", actorUid: ADMIN });
+    const { uid } = await provisionUser({ email, displayName: "قديم", role: "STUDENT", actorUid: ADMIN.uid });
 
     const newEmail = `new-${Date.now()}@example.test`;
     await students.updateStudent(db, ADMIN, uid, { displayName: "جديد", email: newEmail, password: "secret123" });
@@ -118,7 +119,7 @@ describe("admin extras (emulator)", () => {
     await startWithCode(db, uid, examId);
     await expect(students.deleteStudent(db, ADMIN, uid)).rejects.toThrow("امتحان الآن");
 
-    const other = await provisionUser({ email: `del-${Date.now()}@example.test`, displayName: "حذف", role: "STUDENT", actorUid: ADMIN });
+    const other = await provisionUser({ email: `del-${Date.now()}@example.test`, displayName: "حذف", role: "STUDENT", actorUid: ADMIN.uid });
     await students.deleteStudent(db, ADMIN, other.uid);
     await expect(getAdminAuth().getUser(other.uid)).rejects.toThrow();
     expect((await db.collection("users").doc(other.uid).get()).exists).toBe(false);

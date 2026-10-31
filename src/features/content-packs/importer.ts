@@ -4,6 +4,7 @@ import * as questions from "@/features/questions/service";
 import * as exams from "@/features/exams/service";
 import { COLLECTIONS } from "@/types/firestore";
 import type { GradeId } from "@/lib/grades";
+import type { Actor } from "@/lib/workspace";
 
 /** Shape of content/*.json: one chapter, its lessons, and a ready exam of single-choice questions. */
 export interface ContentPack {
@@ -35,19 +36,39 @@ const OPTION_IDS = ["o1", "o2", "o3", "o4", "o5", "o6"];
  * leaves an existing exam with the same title alone. Existing questions get their lesson and images
  * synced; neither is locked content.
  */
+/** Subjects a pack may need in a space that does not have them yet. */
+const SUBJECT_NAMES: Record<string, { nameAr: string; name: string }> = {
+  biology: { nameAr: "الأحياء", name: "Biology" },
+  chemistry: { nameAr: "الكيمياء", name: "Chemistry" },
+  physics: { nameAr: "الفيزياء", name: "Physics" },
+};
+
 export async function importContentPack(
   db: Firestore,
-  actor: string,
+  actor: Actor,
   pack: ContentPack,
   log: (message: string) => void = () => {},
 ): Promise<PackImportResult> {
   const slug = pack.subjectSlug ?? "chemistry";
   const difficulty = pack.exam.difficulty ?? "MEDIUM";
-  const subjectSnap = await db.collection(COLLECTIONS.subjects).where("slug", "==", slug).limit(1).get();
-  if (subjectSnap.empty) throw new Error(`المادة "${slug}" غير موجودة.`);
-  const subjectId = subjectSnap.docs[0].id;
+  const subjectSnap = await db
+    .collection(COLLECTIONS.subjects)
+    .where("workspaceId", "==", actor.workspaceId)
+    .where("slug", "==", slug)
+    .limit(1)
+    .get();
+  let subjectId = subjectSnap.docs[0]?.id;
+  if (!subjectId) {
+    const names = SUBJECT_NAMES[slug];
+    if (!names) throw new Error(`المادة "${slug}" غير موجودة.`);
+    subjectId = await curriculum.createSubject(db, actor, {
+      ...names, slug, description: "", academicYear: "الثانوية العامة", curriculum: "الثانوية العامة",
+      grade: pack.exam.grade, applicableTracks: [], order: 1, isActive: true,
+    });
+    log(`subject created ${subjectId}`);
+  }
 
-  let chapterId = (await curriculum.listChapters(db, subjectId)).find((c) => c.titleAr === pack.chapter.titleAr)?.id;
+  let chapterId = (await curriculum.listChapters(db, actor.workspaceId, subjectId)).find((c) => c.titleAr === pack.chapter.titleAr)?.id;
   if (!chapterId) {
     chapterId = await curriculum.createChapter(db, actor, {
       subjectId, title: pack.chapter.title, titleAr: pack.chapter.titleAr, description: "", order: pack.chapter.order, isActive: true,
@@ -56,7 +77,7 @@ export async function importContentPack(
   }
 
   const lessonIdByKey = new Map<string, string>();
-  const existingLessons = await curriculum.listLessons(db, chapterId);
+  const existingLessons = await curriculum.listLessons(db, actor.workspaceId, chapterId);
   for (const lesson of pack.lessons) {
     let id = existingLessons.find((l) => l.titleAr === lesson.titleAr)?.id;
     if (!id) {
@@ -69,14 +90,14 @@ export async function importContentPack(
   }
 
   const questionIds: string[] = [];
-  const bank = await questions.listQuestions(db, { subjectId });
+  const bank = await questions.listQuestions(db, actor.workspaceId, { subjectId });
   for (const q of pack.questions) {
     const lessonId = lessonIdByKey.get(q.lesson);
     if (!lessonId) throw new Error(`Unknown lesson key "${q.lesson}".`);
     const existing = bank.find((b) => b.statementAr === q.q && b.chapterId === chapterId);
     if (existing) {
       const wanted = q.media ?? [];
-      const detail = await questions.getQuestionDetail(db, existing.id);
+      const detail = await questions.getQuestionDetail(db, actor.workspaceId, existing.id);
       const mediaChanged = Boolean(detail) && wanted.length > 0 && JSON.stringify(detail!.mediaReferences) !== JSON.stringify(wanted);
       if (detail && (mediaChanged || detail.lessonId !== lessonId)) {
         await questions.updateQuestion(db, actor, existing.id, {
@@ -120,7 +141,12 @@ export async function importContentPack(
   log(`questions ready: ${questionIds.length}`);
 
   // Replace an older version of this exam (different question count) only if no student has started it.
-  const existingExam = await db.collection(COLLECTIONS.exams).where("titleAr", "==", pack.exam.titleAr).limit(1).get();
+  const existingExam = await db
+    .collection(COLLECTIONS.exams)
+    .where("workspaceId", "==", actor.workspaceId)
+    .where("titleAr", "==", pack.exam.titleAr)
+    .limit(1)
+    .get();
   if (!existingExam.empty) {
     const old = existingExam.docs[0];
     if (old.data().questionCount === questionIds.length) return { status: "exists", examId: old.id };

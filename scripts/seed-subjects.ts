@@ -18,12 +18,18 @@ const SUBJECTS = [
   { slug: "english", name: "English", nameAr: "اللغة الإنجليزية", order: 5 },
 ] as const;
 
-const ACTOR = "seed-subjects-script";
+// Seeds the main space. Each new teacher space starts empty.
+const ACTOR = { uid: "seed-subjects-script", workspaceId: "main" };
 
 async function main() {
   const db = getAdminDb();
   for (const subject of SUBJECTS) {
-    const existing = await db.collection(COLLECTIONS.subjects).where("slug", "==", subject.slug).limit(1).get();
+    const existing = await db
+      .collection(COLLECTIONS.subjects)
+      .where("workspaceId", "==", ACTOR.workspaceId)
+      .where("slug", "==", subject.slug)
+      .limit(1)
+      .get();
     if (!existing.empty) {
       console.log(`skip  ${subject.slug} (exists)`);
       continue;
@@ -46,7 +52,8 @@ async function main() {
       applicableTracks: [],
       order: subject.order,
       isActive: true,
-      createdBy: ACTOR,
+      workspaceId: ACTOR.workspaceId,
+      createdBy: ACTOR.uid,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });

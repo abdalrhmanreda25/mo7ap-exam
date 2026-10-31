@@ -6,12 +6,16 @@ import { redirect } from "next/navigation";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { isRole, type Role } from "./roles";
 import { SESSION_COOKIE_NAME } from "./session-config";
+import { workspaceOf, type Actor } from "@/lib/workspace";
+import { ensureWorkspacesMigrated } from "@/lib/workspace/migrate";
 
 export interface SessionUser {
   uid: string;
   role: Role;
   email: string | null;
   displayName: string;
+  /** The teacher space this user belongs to. */
+  workspaceId: string;
 }
 
 /**
@@ -37,7 +41,9 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     const decoded = await getAdminAuth().verifySessionCookie(sessionCookie, true);
     if (!isRole(decoded.role)) return null;
 
-    const profileSnap = await getAdminDb().collection("users").doc(decoded.uid).get();
+    const db = getAdminDb();
+    await ensureWorkspacesMigrated(db);
+    const profileSnap = await db.collection("users").doc(decoded.uid).get();
     const profile = profileSnap.data();
     if (!profileSnap.exists || profile?.isActive !== true || profile?.role !== decoded.role) {
       return null;
@@ -48,6 +54,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       role: decoded.role,
       email: decoded.email ?? null,
       displayName: typeof profile.displayName === "string" ? profile.displayName : "",
+      workspaceId: workspaceOf(profile),
     };
   } catch {
     return null;
@@ -58,6 +65,11 @@ export async function getSessionUser(): Promise<SessionUser | null> {
  * Page-level guard. Layouts and pages run this on every request.
  * It is not sufficient alone. Every privileged data access must re-check.
  */
+/** The signed-in teacher as the actor every admin service call takes. */
+export async function requireAdmin(): Promise<SessionUser & Actor> {
+  return requireRole("ADMIN");
+}
+
 export async function requireRole(role: Role): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) redirect("/login");

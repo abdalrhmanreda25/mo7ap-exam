@@ -17,9 +17,9 @@ async function seedPublishedExam() {
   const subjectId = "e2e-subject";
   const chapterId = "e2e-chapter";
   const lessonId = "e2e-lesson";
-  await db.collection("subjects").doc(subjectId).set({ name: "E2E", nameAr: "مادة اختبار", slug: "e2e-subject", description: "", academicYear: "2026", curriculum: "x", applicableTracks: [], order: 99, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
-  await db.collection("chapters").doc(chapterId).set({ subjectId, title: "C", titleAr: "فصل اختبار", description: "", order: 1, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
-  await db.collection("lessons").doc(lessonId).set({ subjectId, chapterId, title: "L", titleAr: "درس اختبار", order: 1, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
+  await db.collection("subjects").doc(subjectId).set({ workspaceId: "main", name: "E2E", nameAr: "مادة اختبار", slug: "e2e-subject", description: "", academicYear: "2026", curriculum: "x", applicableTracks: [], order: 99, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
+  await db.collection("chapters").doc(chapterId).set({ workspaceId: "main", subjectId, title: "C", titleAr: "فصل اختبار", description: "", order: 1, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
+  await db.collection("lessons").doc(lessonId).set({ workspaceId: "main", subjectId, chapterId, title: "L", titleAr: "درس اختبار", order: 1, isActive: true, createdBy: "e2e-seed", createdAt: now, updatedAt: now });
 
   const questions = [
     { id: "e2e-q1", statementAr: "سؤال أول", statement: "First", correct: "b", points: 2 },
@@ -31,11 +31,11 @@ async function seedPublishedExam() {
     { id: "c", textAr: "ج", text: "C", order: 3 },
   ];
   const examRef = db.collection("exams").doc("e2e-exam");
-  await examRef.set({ title: "E2E quick exam", titleAr: "اختبار سريع E2E", description: "", subjectId, chapterIds: [chapterId], lessonIds: [lessonId], academicYear: "2026", durationSeconds: 600, maxAttempts: 1, status: "PUBLISHED", archived: false, questionCount: 2, maxScore: 5, shuffleQuestions: false, shuffleOptions: false, showScoreAfterSubmit: true, showCorrectAnswersAfterSubmit: false, showExplanationsAfterSubmit: false, publishedAt: now, createdBy: "e2e-seed", createdAt: now, updatedAt: now, version: 1 });
+  await examRef.set({ workspaceId: "main", title: "E2E quick exam", titleAr: "اختبار سريع E2E", description: "", subjectId, chapterIds: [chapterId], lessonIds: [lessonId], academicYear: "2026", durationSeconds: 600, maxAttempts: 1, status: "PUBLISHED", archived: false, questionCount: 2, maxScore: 5, shuffleQuestions: false, shuffleOptions: false, showScoreAfterSubmit: true, showCorrectAnswersAfterSubmit: false, showExplanationsAfterSubmit: false, publishedAt: now, createdBy: "e2e-seed", createdAt: now, updatedAt: now, version: 1 });
 
   for (const [i, q] of questions.entries()) {
     const prefix = `${q.id}__`;
-    await db.collection("questions").doc(q.id).set({ subjectId, chapterId, lessonId, type: "SINGLE_CHOICE", statement: q.statement, statementAr: q.statementAr, mediaReferences: [], difficulty: "EASY", explanation: "", explanationAr: "", status: "READY", createdBy: "e2e-seed", createdAt: now, updatedAt: now });
+    await db.collection("questions").doc(q.id).set({ workspaceId: "main", subjectId, chapterId, lessonId, type: "SINGLE_CHOICE", statement: q.statement, statementAr: q.statementAr, mediaReferences: [], difficulty: "EASY", explanation: "", explanationAr: "", status: "READY", createdBy: "e2e-seed", createdAt: now, updatedAt: now });
     for (const o of options) {
       await db.collection("questionOptions").doc(prefix + o.id).set({ questionId: q.id, text: o.text, textAr: o.textAr, order: o.order, createdAt: now, updatedAt: now });
     }

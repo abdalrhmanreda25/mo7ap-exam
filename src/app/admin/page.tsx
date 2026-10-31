@@ -26,9 +26,9 @@ async function AdminHomeContent() {
   const user = await requireRole("ADMIN");
   const db = getAdminDb();
   const [subjects, exams, questions] = await Promise.all([
-    listSubjects(db),
-    listExams(db),
-    db.collection(COLLECTIONS.questions).count().get(),
+    listSubjects(db, user.workspaceId),
+    listExams(db, user.workspaceId),
+    db.collection(COLLECTIONS.questions).where("workspaceId", "==", user.workspaceId).count().get(),
   ]);
   const drafts = exams.filter((e) => e.status === "DRAFT").length;
 

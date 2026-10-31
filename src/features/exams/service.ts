@@ -15,6 +15,8 @@ import { DomainError } from "@/lib/server/errors";
 import { canTransitionExam } from "@/lib/domain/state";
 import type { ExamConfig, ExamConfigInput } from "@/lib/validation/exams";
 import { gradeOf } from "@/lib/grades";
+import { assertInWorkspace, inWorkspace, type Actor } from "@/lib/workspace";
+import { requireSubject } from "@/features/curriculum/service";
 import { COLLECTIONS, type ExamStatus, type QuestionType } from "@/types/firestore";
 import {
   buildSnapshot,
@@ -96,16 +98,23 @@ function examDto(id: string, d: FirebaseFirestore.DocumentData): ExamDto {
   };
 }
 
-export async function listExams(db: Firestore): Promise<ExamDto[]> {
-  const snap = await db.collection(COLLECTIONS.exams).get();
+export async function listExams(db: Firestore, workspaceId: string): Promise<ExamDto[]> {
+  const snap = await db.collection(COLLECTIONS.exams).where("workspaceId", "==", workspaceId).get();
   return snap.docs
     .map((doc) => examDto(doc.id, doc.data()))
     .sort((a, b) => a.titleAr.localeCompare(b.titleAr, "ar"));
 }
 
-export async function getExam(db: Firestore, examId: string): Promise<ExamDto | null> {
+export async function getExam(db: Firestore, workspaceId: string, examId: string): Promise<ExamDto | null> {
   const snap = await db.collection(COLLECTIONS.exams).doc(examId).get();
-  return snap.exists ? examDto(snap.id, snap.data()!) : null;
+  return inWorkspace(snap.data(), workspaceId) ? examDto(snap.id, snap.data()!) : null;
+}
+
+/** An exam of this space, or "not found" for a missing exam and another space's exam alike. */
+async function requireExam(db: Firestore, workspaceId: string, examId: string) {
+  const snap = await db.collection(COLLECTIONS.exams).doc(examId).get();
+  assertInWorkspace(snap.data(), workspaceId, "الامتحان غير موجود.");
+  return snap;
 }
 
 /** Loads the composed questions in order, each with its bank state and key. */
@@ -164,9 +173,9 @@ export async function loadComposition(db: Firestore, reader: Reader, examId: str
   return items;
 }
 
-async function requireExamStatus(tx: Transaction, examRef: DocumentReference, expected: ExamStatus) {
+async function requireExamStatus(tx: Transaction, workspaceId: string, examRef: DocumentReference, expected: ExamStatus) {
   const snap = await tx.get(examRef);
-  if (!snap.exists) throw new DomainError("الامتحان غير موجود.");
+  assertInWorkspace(snap.data(), workspaceId, "الامتحان غير موجود.");
   if (snap.data()!.status !== expected) {
     throw new DomainError(
       expected === "DRAFT" ? "هذا الإجراء متاح للمسودات فقط." : "هذا الإجراء غير متاح في حالة الامتحان الحالية.",
@@ -186,9 +195,8 @@ function totalsPatch(items: CompositionView[]) {
   };
 }
 
-export async function createDraftExam(db: Firestore, actorUid: string, config: ExamConfigInput): Promise<string> {
-  const subject = await db.collection(COLLECTIONS.subjects).doc(config.subjectId).get();
-  if (!subject.exists) throw new DomainError("المادة غير موجودة.");
+export async function createDraftExam(db: Firestore, actor: Actor, config: ExamConfigInput): Promise<string> {
+  await requireSubject(db, actor.workspaceId, config.subjectId);
 
   const ref = db.collection(COLLECTIONS.exams).doc();
   const batch = db.batch();
@@ -203,40 +211,41 @@ export async function createDraftExam(db: Firestore, actorUid: string, config: E
     questionCount: 0,
     maxScore: 0,
     publishedAt: null,
-    createdBy: actorUid,
+    workspaceId: actor.workspaceId,
+    createdBy: actor.uid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
     version: 1,
   });
-  const audit = auditLogWrite(db, actorUid, { action: "EXAM_CREATED", targetType: "exam", targetId: ref.id });
+  const audit = auditLogWrite(db, actor, { action: "EXAM_CREATED", targetType: "exam", targetId: ref.id });
   batch.set(audit.ref, audit.data);
   await batch.commit();
   return ref.id;
 }
 
-export async function updateDraftExam(db: Firestore, actorUid: string, examId: string, config: ExamConfigInput) {
+export async function updateDraftExam(db: Firestore, actor: Actor, examId: string, config: ExamConfigInput) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    const exam = await requireExamStatus(tx, examRef, "DRAFT");
+    const exam = await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
     if (exam.subjectId !== config.subjectId) {
       throw new DomainError("لا يمكن تغيير مادة الامتحان بعد إنشائه.");
     }
     tx.update(examRef, { ...configFields(config), updatedAt: FieldValue.serverTimestamp() });
-    const audit = auditLogWrite(db, actorUid, { action: "EXAM_UPDATED", targetType: "exam", targetId: examId });
+    const audit = auditLogWrite(db, actor, { action: "EXAM_UPDATED", targetType: "exam", targetId: examId });
     tx.set(audit.ref, audit.data);
   });
 }
 
 export async function addQuestionToExam(
   db: Firestore,
-  actorUid: string,
+  actor: Actor,
   examId: string,
   questionId: string,
   points: number,
 ) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    const exam = await requireExamStatus(tx, examRef, "DRAFT");
+    const exam = await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
     const reader = txReader(tx);
     const items = await loadComposition(db, reader, examId);
     if (items.some((item) => item.questionId === questionId)) {
@@ -244,7 +253,7 @@ export async function addQuestionToExam(
     }
 
     const bankSnap = await tx.get(db.collection(COLLECTIONS.questions).doc(questionId));
-    if (!bankSnap.exists) throw new DomainError("السؤال غير موجود في البنك.");
+    if (!inWorkspace(bankSnap.data(), actor.workspaceId)) throw new DomainError("السؤال غير موجود في البنك.");
     const bankData = bankSnap.data()!;
     if (bankData.status !== "READY") throw new DomainError("يمكن إضافة الأسئلة الجاهزة فقط.");
     if (bankData.subjectId !== exam.subjectId) {
@@ -299,7 +308,7 @@ export async function addQuestionToExam(
       },
     ];
     tx.update(examRef, totalsPatch(next));
-    const audit = auditLogWrite(db, actorUid, {
+    const audit = auditLogWrite(db, actor, {
       action: "EXAM_QUESTION_ADDED",
       targetType: "exam",
       targetId: examId,
@@ -309,10 +318,10 @@ export async function addQuestionToExam(
   });
 }
 
-export async function removeQuestionFromExam(db: Firestore, actorUid: string, examId: string, questionId: string) {
+export async function removeQuestionFromExam(db: Firestore, actor: Actor, examId: string, questionId: string) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    await requireExamStatus(tx, examRef, "DRAFT");
+    await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
     const items = await loadComposition(db, txReader(tx), examId);
     const target = items.find((item) => item.questionId === questionId);
     if (!target) throw new DomainError("السؤال غير موجود في هذا الامتحان.");
@@ -326,7 +335,7 @@ export async function removeQuestionFromExam(db: Firestore, actorUid: string, ex
     });
     tx.delete(examRef.collection(COLLECTIONS.examQuestions).doc(target.examQuestionId));
     tx.update(examRef, totalsPatch(remaining));
-    const audit = auditLogWrite(db, actorUid, {
+    const audit = auditLogWrite(db, actor, {
       action: "EXAM_QUESTION_REMOVED",
       targetType: "exam",
       targetId: examId,
@@ -338,13 +347,14 @@ export async function removeQuestionFromExam(db: Firestore, actorUid: string, ex
 
 export async function moveQuestionInExam(
   db: Firestore,
+  actor: Actor,
   examId: string,
   questionId: string,
   direction: "up" | "down",
 ) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    await requireExamStatus(tx, examRef, "DRAFT");
+    await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
     const items = await loadComposition(db, txReader(tx), examId);
     const index = items.findIndex((item) => item.questionId === questionId);
     if (index === -1) throw new DomainError("السؤال غير موجود في هذا الامتحان.");
@@ -358,10 +368,10 @@ export async function moveQuestionInExam(
   });
 }
 
-export async function setQuestionPoints(db: Firestore, examId: string, questionId: string, points: number) {
+export async function setQuestionPoints(db: Firestore, actor: Actor, examId: string, questionId: string, points: number) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    await requireExamStatus(tx, examRef, "DRAFT");
+    await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
     const items = await loadComposition(db, txReader(tx), examId);
     const target = items.find((item) => item.questionId === questionId);
     if (!target) throw new DomainError("السؤال غير موجود في هذا الامتحان.");
@@ -379,10 +389,10 @@ export async function setQuestionPoints(db: Firestore, examId: string, questionI
  *  4. flips the status and stamps publishedAt.
  * Any failure aborts everything. Publishing twice is refused by the status check.
  */
-export async function publishExam(db: Firestore, actorUid: string, examId: string) {
+export async function publishExam(db: Firestore, actor: Actor, examId: string) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
-    const exam = await requireExamStatus(tx, examRef, "DRAFT");
+    const exam = await requireExamStatus(tx, actor.workspaceId, examRef, "DRAFT");
 
     const items = await loadComposition(db, txReader(tx), examId);
     const issues = readinessIssues(items, exam.durationSeconds, exam.maxScore);
@@ -415,7 +425,7 @@ export async function publishExam(db: Firestore, actorUid: string, examId: strin
       publishedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
-    const audit = auditLogWrite(db, actorUid, {
+    const audit = auditLogWrite(db, actor, {
       action: "EXAM_PUBLISHED",
       targetType: "exam",
       targetId: examId,
@@ -426,40 +436,41 @@ export async function publishExam(db: Firestore, actorUid: string, examId: strin
 }
 
 /** Closing blocks new starts only. Existing attempts keep their deadline and are not erased. */
-export async function closeExam(db: Firestore, actorUid: string, examId: string) {
+export async function closeExam(db: Firestore, actor: Actor, examId: string) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(examRef);
-    if (!snap.exists) throw new DomainError("الامتحان غير موجود.");
+    assertInWorkspace(snap.data(), actor.workspaceId, "الامتحان غير موجود.");
     if (!canTransitionExam(snap.data()!.status, "CLOSED")) {
       throw new DomainError("لا يمكن إغلاق امتحان غير منشور.");
     }
     tx.update(examRef, { status: "CLOSED", updatedAt: FieldValue.serverTimestamp() });
-    const audit = auditLogWrite(db, actorUid, { action: "EXAM_CLOSED", targetType: "exam", targetId: examId });
+    const audit = auditLogWrite(db, actor, { action: "EXAM_CLOSED", targetType: "exam", targetId: examId });
     tx.set(audit.ref, audit.data);
   });
 }
 
-export async function archiveExam(db: Firestore, actorUid: string, examId: string) {
+export async function archiveExam(db: Firestore, actor: Actor, examId: string) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(examRef);
-    if (!snap.exists) throw new DomainError("الامتحان غير موجود.");
+    assertInWorkspace(snap.data(), actor.workspaceId, "الامتحان غير موجود.");
     if (snap.data()!.status !== "CLOSED") throw new DomainError("يمكن أرشفة الامتحانات المغلقة فقط.");
     tx.update(examRef, { archived: true, updatedAt: FieldValue.serverTimestamp() });
-    const audit = auditLogWrite(db, actorUid, { action: "EXAM_ARCHIVED", targetType: "exam", targetId: examId });
+    const audit = auditLogWrite(db, actor, { action: "EXAM_ARCHIVED", targetType: "exam", targetId: examId });
     tx.set(audit.ref, audit.data);
   });
 }
 
-export async function getExamComposition(db: Firestore, examId: string): Promise<CompositionView[]> {
+export async function getExamComposition(db: Firestore, workspaceId: string, examId: string): Promise<CompositionView[]> {
+  if (!(await getExam(db, workspaceId, examId))) return [];
   return loadComposition(db, directReader(), examId);
 }
 
-export async function getExamReadiness(db: Firestore, examId: string) {
-  const exam = await getExam(db, examId);
+export async function getExamReadiness(db: Firestore, workspaceId: string, examId: string) {
+  const exam = await getExam(db, workspaceId, examId);
   if (!exam) return null;
-  const items = await getExamComposition(db, examId);
+  const items = await getExamComposition(db, workspaceId, examId);
   return {
     issues: readinessIssues(items, exam.durationSeconds, exam.maxScore),
     totals: computeTotals(items),
@@ -467,9 +478,10 @@ export async function getExamReadiness(db: Firestore, examId: string) {
 }
 
 /** Bank questions that can be added to this exam: ready, same subject, not already composed. */
-export async function listAddableQuestions(db: Firestore, subjectId: string, excludeIds: string[]) {
+export async function listAddableQuestions(db: Firestore, workspaceId: string, subjectId: string, excludeIds: string[]) {
   const snap = await db
     .collection(COLLECTIONS.questions)
+    .where("workspaceId", "==", workspaceId)
     .where("subjectId", "==", subjectId)
     .where("status", "==", "READY")
     .get();
@@ -490,10 +502,9 @@ export async function listAddableQuestions(db: Firestore, subjectId: string, exc
  * Hard delete. Refused when any student attempt exists, because attempts and results are history.
  * Those exams can only be archived. Deletes the question set and answer keys with the exam.
  */
-export async function deleteExam(db: Firestore, actorUid: string, examId: string) {
+export async function deleteExam(db: Firestore, actor: Actor, examId: string) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
-  const exam = await examRef.get();
-  if (!exam.exists) throw new DomainError("الامتحان غير موجود.");
+  const exam = await requireExam(db, actor.workspaceId, examId);
 
   const attempts = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).limit(1).get();
   if (!attempts.empty) {
@@ -501,7 +512,7 @@ export async function deleteExam(db: Firestore, actorUid: string, examId: string
   }
 
   const title = String(exam.data()?.titleAr ?? "");
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "EXAM_DELETED",
     targetType: "exam",
     targetId: examId,
@@ -513,7 +524,8 @@ export async function deleteExam(db: Firestore, actorUid: string, examId: string
   await db.recursiveDelete(db.collection(COLLECTIONS.examAnswerKeys).doc(examId));
 }
 
-export async function countExamAttempts(db: Firestore, examId: string): Promise<number> {
+export async function countExamAttempts(db: Firestore, workspaceId: string, examId: string): Promise<number> {
+  if (!(await getExam(db, workspaceId, examId))) return 0;
   const snap = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).count().get();
   return snap.data().count;
 }
@@ -528,11 +540,10 @@ export interface ReviewPolicy {
  * What students see after submitting. Safe to change on a published or closed exam: it never
  * touches questions, keys, or scores. Applies to past and future attempts when they view results.
  */
-export async function updateReviewPolicy(db: Firestore, actorUid: string, examId: string, policy: ReviewPolicy) {
+export async function updateReviewPolicy(db: Firestore, actor: Actor, examId: string, policy: ReviewPolicy) {
   const examRef = db.collection(COLLECTIONS.exams).doc(examId);
-  const snap = await examRef.get();
-  if (!snap.exists) throw new DomainError("الامتحان غير موجود.");
-  const audit = auditLogWrite(db, actorUid, {
+  await requireExam(db, actor.workspaceId, examId);
+  const audit = auditLogWrite(db, actor, {
     action: "EXAM_REVIEW_POLICY_UPDATED",
     targetType: "exam",
     targetId: examId,
@@ -549,12 +560,12 @@ export async function updateReviewPolicy(db: Firestore, actorUid: string, examId
  * snapshots refreshed from the bank (so bank fixes such as added images are picked up).
  * The original stays untouched with its attempts and results.
  */
-export async function cloneExam(db: Firestore, actorUid: string, examId: string): Promise<{ id: string; skipped: number }> {
-  const source = await getExam(db, examId);
+export async function cloneExam(db: Firestore, actor: Actor, examId: string): Promise<{ id: string; skipped: number }> {
+  const source = await getExam(db, actor.workspaceId, examId);
   if (!source) throw new DomainError("الامتحان غير موجود.");
-  const items = await getExamComposition(db, examId);
+  const items = await getExamComposition(db, actor.workspaceId, examId);
 
-  const newId = await createDraftExam(db, actorUid, {
+  const newId = await createDraftExam(db, actor, {
     title: source.title,
     titleAr: `${source.titleAr} (نسخة جديدة)`,
     description: source.description,
@@ -574,7 +585,7 @@ export async function cloneExam(db: Firestore, actorUid: string, examId: string)
   let skipped = 0;
   for (const item of items) {
     try {
-      await addQuestionToExam(db, actorUid, newId, item.questionId, item.points);
+      await addQuestionToExam(db, actor, newId, item.questionId, item.points);
     } catch {
       skipped++; // archived or deleted bank question
     }
@@ -583,7 +594,8 @@ export async function cloneExam(db: Firestore, actorUid: string, examId: string)
 }
 
 /** The code a student must type to start this exam, or null when the admin has not generated one. */
-export async function getAccessCode(db: Firestore, examId: string): Promise<string | null> {
+export async function getAccessCode(db: Firestore, workspaceId: string, examId: string): Promise<string | null> {
+  if (!(await getExam(db, workspaceId, examId))) return null;
   const snap = await db.collection(COLLECTIONS.examAccessCodes).doc(examId).get();
   return snap.exists ? (snap.data()!.code as string) : null;
 }
@@ -592,14 +604,13 @@ export async function getAccessCode(db: Firestore, examId: string): Promise<stri
  * Generates a new access code for an exam and replaces the old one. Students who already
  * started keep going without a code; only new starts need the current code.
  */
-export async function generateAccessCode(db: Firestore, actorUid: string, examId: string): Promise<string> {
-  const examSnap = await db.collection(COLLECTIONS.exams).doc(examId).get();
-  if (!examSnap.exists) throw new DomainError("الامتحان غير موجود.");
-  const previous = await getAccessCode(db, examId);
+export async function generateAccessCode(db: Firestore, actor: Actor, examId: string): Promise<string> {
+  await requireExam(db, actor.workspaceId, examId);
+  const previous = await getAccessCode(db, actor.workspaceId, examId);
   let code = makeAccessCode();
   while (code === previous) code = makeAccessCode();
 
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "EXAM_ACCESS_CODE_GENERATED",
     targetType: "exam",
     targetId: examId,
@@ -608,7 +619,7 @@ export async function generateAccessCode(db: Firestore, actorUid: string, examId
   const batch = db.batch();
   batch.set(db.collection(COLLECTIONS.examAccessCodes).doc(examId), {
     code,
-    createdBy: actorUid,
+    createdBy: actor.uid,
     createdAt: FieldValue.serverTimestamp(),
   });
   batch.set(audit.ref, audit.data);

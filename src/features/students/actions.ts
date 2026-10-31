@@ -58,5 +58,5 @@ export async function deleteStudentAction(uid: string) {
 }
 
 export async function studentPasswordLinkAction(uid: string) {
-  return runAdminAction(async () => ({ link: await service.studentPasswordLink(db(), idSchema.parse(uid)) }));
+  return runAdminAction(async (actor) => ({ link: await service.studentPasswordLink(db(), actor.workspaceId, idSchema.parse(uid)) }));
 }

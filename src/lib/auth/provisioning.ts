@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin-core";
 import { isRole, type Role } from "./roles";
+import { MAIN_WORKSPACE_ID } from "@/lib/workspace";
 
 /**
  * Trusted account administration. Only callable from server code or the local
@@ -20,6 +21,8 @@ export async function provisionUser(input: {
   displayName: string;
   role: Role;
   actorUid: string;
+  /** Teacher space for the account. Defaults to the main space. */
+  workspaceId?: string;
 }): Promise<ProvisionResult> {
   if (!isRole(input.role)) throw new Error(`Invalid role: ${input.role}`);
 
@@ -54,6 +57,7 @@ export async function provisionUser(input: {
       email,
       role: input.role,
       isActive: true,
+      workspaceId: input.workspaceId ?? existingProfile.data()?.workspaceId ?? MAIN_WORKSPACE_ID,
       updatedAt: FieldValue.serverTimestamp(),
       ...(existingProfile.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
     },

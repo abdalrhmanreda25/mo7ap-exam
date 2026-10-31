@@ -4,23 +4,25 @@ import { ZodError } from "zod";
 import { getSessionUser } from "@/lib/auth/session";
 import type { ActionResult } from "./action-result";
 import { DomainError } from "./errors";
+import type { Actor } from "@/lib/workspace";
 
 /**
  * Wrapper for every admin server action. Server actions are public POST endpoints,
  * so the role check happens here on every call, not only in the page layout.
  * Errors become typed results. Stack traces and raw Firestore messages never reach the client.
  */
-export async function runAdminAction<T>(task: (actorUid: string) => Promise<T>): Promise<ActionResult<T>> {
+export async function runAdminAction<T>(task: (actor: Actor) => Promise<T>): Promise<ActionResult<T>> {
   return runSessionAction("ADMIN", task);
 }
 
+/** Students act on their own records only; ownership is checked by uid, so the task gets the uid. */
 export async function runStudentAction<T>(task: (studentUid: string) => Promise<T>): Promise<ActionResult<T>> {
-  return runSessionAction("STUDENT", task);
+  return runSessionAction("STUDENT", (actor) => task(actor.uid));
 }
 
 async function runSessionAction<T>(
   role: "ADMIN" | "STUDENT",
-  task: (uid: string) => Promise<T>,
+  task: (actor: Actor) => Promise<T>,
 ): Promise<ActionResult<T>> {
   const user = await getSessionUser();
   if (!user || user.role !== role) {
@@ -28,7 +30,7 @@ async function runSessionAction<T>(
   }
 
   try {
-    return { ok: true, data: await task(user.uid) };
+    return { ok: true, data: await task({ uid: user.uid, workspaceId: user.workspaceId }) };
   } catch (error) {
     if (error instanceof ZodError) {
       const fieldErrors: Record<string, string> = {};

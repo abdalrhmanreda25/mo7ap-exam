@@ -14,6 +14,7 @@ import { EXAM_STATUS_AR } from "@/lib/labels";
 import { gradeLabel } from "@/lib/grades";
 import { CONTENT_PACKS } from "@/features/content-packs/packs";
 import { ReadyExams } from "@/features/content-packs/components/ready-exams";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "الامتحانات" };
 
@@ -38,7 +39,8 @@ export default function ExamsPage() {
 async function ExamsContent() {
   await connection();
   const db = getAdminDb();
-  const [exams, subjects] = await Promise.all([listExams(db), listSubjects(db)]);
+  const { workspaceId: ws } = await requireAdmin();
+  const [exams, subjects] = await Promise.all([listExams(db, ws), listSubjects(db, ws)]);
   const subjectName = new Map(subjects.map((s) => [s.id, s.nameAr]));
   const visible = exams.filter((e) => !e.archived);
   const archived = exams.filter((e) => e.archived);

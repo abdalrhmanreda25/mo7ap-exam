@@ -5,6 +5,7 @@ import { auditLogWrite } from "@/lib/audit/log";
 import { DomainError } from "@/lib/server/errors";
 import type { QuestionInput } from "@/lib/validation/questions";
 import { COLLECTIONS, type QuestionDifficulty, type QuestionStatus, type QuestionType } from "@/types/firestore";
+import { assertInWorkspace, inWorkspace, type Actor } from "@/lib/workspace";
 import { changedContentFields, CONTENT_FIELD_LABELS, isContentLocked, type QuestionContent } from "./content-lock";
 
 export interface QuestionListItem {
@@ -38,8 +39,8 @@ type ExamUsage = { examId: string; examStatus: string };
  * An exam question's doc ID is the bank question ID, so this reads one doc per exam
  * instead of a collection-group query, which needs a dedicated index in production.
  */
-export async function questionExamUsage(db: Firestore, questionId: string): Promise<ExamUsage[]> {
-  const exams = await db.collection(COLLECTIONS.exams).get();
+export async function questionExamUsage(db: Firestore, workspaceId: string, questionId: string): Promise<ExamUsage[]> {
+  const exams = await db.collection(COLLECTIONS.exams).where("workspaceId", "==", workspaceId).get();
   if (exams.empty) return [];
   const held = await db.getAll(...exams.docs.map((exam) => exam.ref.collection(COLLECTIONS.examQuestions).doc(questionId)));
   return exams.docs
@@ -48,8 +49,8 @@ export async function questionExamUsage(db: Firestore, questionId: string): Prom
 }
 
 /** Exam usage for every question at once: one read of each exam's question list. */
-export async function examUsageByQuestion(db: Firestore): Promise<Map<string, ExamUsage[]>> {
-  const exams = await db.collection(COLLECTIONS.exams).get();
+export async function examUsageByQuestion(db: Firestore, workspaceId: string): Promise<Map<string, ExamUsage[]>> {
+  const exams = await db.collection(COLLECTIONS.exams).where("workspaceId", "==", workspaceId).get();
   const lists = await Promise.all(exams.docs.map((exam) => exam.ref.collection(COLLECTIONS.examQuestions).select().get()));
   const usage = new Map<string, ExamUsage[]>();
   exams.docs.forEach((exam, index) => {
@@ -61,8 +62,12 @@ export async function examUsageByQuestion(db: Firestore): Promise<Map<string, Ex
   return usage;
 }
 
-export async function listQuestions(db: Firestore, filter: { subjectId?: string; status?: QuestionStatus } = {}) {
-  let query: FirebaseFirestore.Query = db.collection(COLLECTIONS.questions);
+export async function listQuestions(
+  db: Firestore,
+  workspaceId: string,
+  filter: { subjectId?: string; status?: QuestionStatus } = {},
+) {
+  let query: FirebaseFirestore.Query = db.collection(COLLECTIONS.questions).where("workspaceId", "==", workspaceId);
   if (filter.subjectId) query = query.where("subjectId", "==", filter.subjectId);
   if (filter.status) query = query.where("status", "==", filter.status);
   const snap = await query.get();
@@ -83,14 +88,15 @@ export async function listQuestions(db: Firestore, filter: { subjectId?: string;
   });
 }
 
-export async function getQuestionDetail(db: Firestore, questionId: string): Promise<QuestionDetail | null> {
+export async function getQuestionDetail(db: Firestore, workspaceId: string, questionId: string): Promise<QuestionDetail | null> {
   const snap = await db.collection(COLLECTIONS.questions).doc(questionId).get();
-  if (!snap.exists) return null;
+  if (!inWorkspace(snap.data(), workspaceId)) return null;
   const d = snap.data()!;
+  // Options and answer keys are reached only through a question of this space.
   const [optionsSnap, keySnap, usage] = await Promise.all([
     db.collection(COLLECTIONS.questionOptions).where("questionId", "==", questionId).get(),
     db.collection(COLLECTIONS.questionAnswerKeys).doc(questionId).get(),
-    questionExamUsage(db, questionId),
+    questionExamUsage(db, workspaceId, questionId),
   ]);
   const options = optionsSnap.docs
     .map((doc) => ({
@@ -122,11 +128,14 @@ export async function getQuestionDetail(db: Firestore, questionId: string): Prom
   };
 }
 
-async function requireLessonPlacement(db: Firestore, input: QuestionInput) {
+async function requireLessonPlacement(db: Firestore, workspaceId: string, input: QuestionInput) {
   const [lesson, chapter] = await Promise.all([
     db.collection(COLLECTIONS.lessons).doc(input.lessonId).get(),
     db.collection(COLLECTIONS.chapters).doc(input.chapterId).get(),
   ]);
+  if (!inWorkspace(lesson.data(), workspaceId) || !inWorkspace(chapter.data(), workspaceId)) {
+    throw new DomainError("الدرس غير موجود.");
+  }
   if (!lesson.exists || lesson.data()?.chapterId !== input.chapterId || lesson.data()?.subjectId !== input.subjectId) {
     throw new DomainError("الدرس لا ينتمي إلى الفصل أو المادة المختارة.");
   }
@@ -147,8 +156,8 @@ function contentOf(input: QuestionInput): QuestionContent {
   };
 }
 
-export async function createQuestion(db: Firestore, actorUid: string, input: QuestionInput): Promise<string> {
-  await requireLessonPlacement(db, input);
+export async function createQuestion(db: Firestore, actor: Actor, input: QuestionInput): Promise<string> {
+  await requireLessonPlacement(db, actor.workspaceId, input);
   const ref = db.collection(COLLECTIONS.questions).doc();
   const batch = db.batch();
   batch.set(ref, {
@@ -163,7 +172,8 @@ export async function createQuestion(db: Firestore, actorUid: string, input: Que
     explanation: input.explanation,
     explanationAr: input.explanationAr,
     status: input.status,
-    createdBy: actorUid,
+    workspaceId: actor.workspaceId,
+    createdBy: actor.uid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -179,28 +189,28 @@ export async function createQuestion(db: Firestore, actorUid: string, input: Que
   }
   batch.set(db.collection(COLLECTIONS.questionAnswerKeys).doc(ref.id), {
     correctOptionId: optionDocId(ref.id, input.correctOptionId),
-    updatedBy: actorUid,
+    updatedBy: actor.uid,
     updatedAt: FieldValue.serverTimestamp(),
   });
-  const audit = auditLogWrite(db, actorUid, { action: "QUESTION_CREATED", targetType: "question", targetId: ref.id });
+  const audit = auditLogWrite(db, actor, { action: "QUESTION_CREATED", targetType: "question", targetId: ref.id });
   batch.set(audit.ref, audit.data);
   await batch.commit();
   return ref.id;
 }
 
-export async function updateQuestion(db: Firestore, actorUid: string, questionId: string, input: QuestionInput) {
+export async function updateQuestion(db: Firestore, actor: Actor, questionId: string, input: QuestionInput) {
   const ref = db.collection(COLLECTIONS.questions).doc(questionId);
-  const existing = await ref.get();
-  if (!existing.exists) throw new DomainError("السؤال غير موجود.");
-  if (existing.data()?.subjectId !== input.subjectId) {
+  const existing = (await ref.get()).data();
+  assertInWorkspace(existing, actor.workspaceId, "السؤال غير موجود.");
+  if (existing.subjectId !== input.subjectId) {
     throw new DomainError("لا يمكن تغيير مادة السؤال بعد إنشائه.");
   }
-  await requireLessonPlacement(db, input);
+  await requireLessonPlacement(db, actor.workspaceId, input);
 
-  const usage = await questionExamUsage(db, questionId);
+  const usage = await questionExamUsage(db, actor.workspaceId, questionId);
   const locked = isContentLocked(usage.map((u) => u.examStatus));
 
-  const current = await getQuestionDetail(db, questionId);
+  const current = await getQuestionDetail(db, actor.workspaceId, questionId);
   if (locked && current) {
     // Compare stored content against the incoming content, never input against itself.
     const changed = changedContentFields(contentOf(current), contentOf(input));
@@ -248,11 +258,11 @@ export async function updateQuestion(db: Firestore, actorUid: string, questionId
   }
   batch.set(db.collection(COLLECTIONS.questionAnswerKeys).doc(questionId), {
     correctOptionId: optionDocId(questionId, input.correctOptionId),
-    updatedBy: actorUid,
+    updatedBy: actor.uid,
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "QUESTION_UPDATED",
     targetType: "question",
     targetId: questionId,

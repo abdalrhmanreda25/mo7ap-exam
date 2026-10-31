@@ -30,9 +30,9 @@ async function DashboardContent() {
   const grade = await getStudentGrade(db, user.uid);
 
   const [subjects, chapters, exams, resultsSnap] = await Promise.all([
-    listSubjects(db),
-    listChapters(db),
-    listPublishedExams(db, grade),
+    listSubjects(db, user.workspaceId),
+    listChapters(db, user.workspaceId),
+    listPublishedExams(db, user.workspaceId, grade),
     db.collection("results").where("studentId", "==", user.uid).get(),
   ]);
 

@@ -9,7 +9,8 @@ const { importContentPack } = await import("@/features/content-packs/importer");
 const { CONTENT_PACKS } = await import("@/features/content-packs/packs");
 
 const db = getAdminDb();
-const ADMIN = "test-admin";
+const ADMIN = { uid: "test-admin", workspaceId: "main" };
+const WS = ADMIN.workspaceId;
 
 async function ensureSubject(slug: string) {
   const snap = await db.collection("subjects").where("slug", "==", slug).limit(1).get();
@@ -44,10 +45,10 @@ describe("ready exam packs (Firestore emulator)", () => {
     if (first.status !== "published") return;
     expect(first.questionCount).toBe(pack.questions.length);
 
-    const exam = await exams.getExam(db, first.examId);
+    const exam = await exams.getExam(db, WS, first.examId);
     expect(exam?.status).toBe("PUBLISHED");
     expect(exam?.maxScore).toBe(pack.questions.length * pack.exam.pointsPerQuestion);
-    expect(await exams.getAccessCode(db, first.examId)).toBe(first.accessCode);
+    expect(await exams.getAccessCode(db, WS, first.examId)).toBe(first.accessCode);
 
     const again = await importContentPack(db, ADMIN, pack);
     expect(again).toEqual({ status: "exists", examId: first.examId });

@@ -7,33 +7,24 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-  updateDoc,
-  where,
-  addDoc,
-} from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, Timestamp, updateDoc } from "firebase/firestore";
 
 /**
  * Direct client-SDK attacks against firestore.rules, run on the Firestore emulator.
- * Every denied case is an attack the spec names: role escalation, answer-key reads,
- * score tampering, submitted-attempt edits, result edits, cross-student reads, and so on.
+ * Browsers may touch camera signaling only. Everything else is server-only, so every
+ * client read or write of it must fail, for every role. Camera sessions are scoped to
+ * one teacher space: the teacher of another space can neither watch nor answer.
  */
 
 const RULES = readFileSync(path.resolve(process.cwd(), "firestore.rules"), "utf8");
 const [FS_HOST, FS_PORT] = (process.env.FIRESTORE_EMULATOR_HOST ?? "127.0.0.1:8181").split(":");
 
-const ADMIN = "admin1";
-const STUDENT = "stu1";
-const OTHER_STUDENT = "stu2";
+const WS = "ws-a";
+const OTHER_WS = "ws-b";
+const ADMIN = "admin1"; // teacher of WS
+const OTHER_ADMIN = "adminB"; // teacher of OTHER_WS
+const STUDENT = "stu1"; // student of WS
+const OTHER_STUDENT = "stu2"; // another student of WS
 const INACTIVE_STUDENT = "stuOff";
 const SPOOFED_ADMIN = "fakeAdmin"; // token claims ADMIN, profile says STUDENT
 const ANON = null;
@@ -41,81 +32,59 @@ const ANON = null;
 let env: RulesTestEnvironment;
 
 const ts = () => Timestamp.now();
-
-const subjectPayload = (overrides: Record<string, unknown> = {}) => ({
-  name: "Physics",
-  nameAr: "الفيزياء",
-  slug: "physics",
-  description: "",
-  academicYear: "2026",
-  curriculum: "thanaweya",
-  applicableTracks: ["science"],
-  order: 1,
-  isActive: true,
-  createdBy: ADMIN,
-  createdAt: serverTimestamp(),
-  updatedAt: serverTimestamp(),
-  ...overrides,
-});
+const offer = { type: "offer", sdp: "v=0" };
+const answer = { type: "answer", sdp: "v=0" };
 
 function asUser(uid: string | null, role?: "ADMIN" | "STUDENT") {
   if (uid === null) return env.unauthenticatedContext().firestore();
   return env.authenticatedContext(uid, role ? { role } : {}).firestore();
 }
 
+/** Server-only paths: one existing document in each. */
+const SERVER_ONLY: string[][] = [
+  ["users", STUDENT],
+  ["workspaces", WS],
+  ["subjects", "s1"],
+  ["chapters", "c1"],
+  ["lessons", "l1"],
+  ["questions", "q1"],
+  ["questionOptions", "q1__a"],
+  ["questionAnswerKeys", "q1"],
+  ["questionMedia", "m1"],
+  ["exams", "e1"],
+  ["exams", "e1", "questions", "q1"],
+  ["examAnswerKeys", "e1", "items", "q1"],
+  ["examAccessCodes", "e1"],
+  ["attempts", "e1__stu1"],
+  ["attempts", "e1__stu1", "answers", "q1"],
+  ["results", "e1__stu1"],
+  ["auditLogs", "log1"],
+  ["system", "migrations"],
+];
+
 async function seed() {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
     const now = ts();
-    const profile = (uid: string, role: string, isActive: boolean) =>
-      setDoc(doc(db, "users", uid), { uid, displayName: uid, email: null, role, isActive, createdAt: now, updatedAt: now });
+    const profile = (uid: string, role: string, isActive: boolean, workspaceId: string) =>
+      setDoc(doc(db, "users", uid), { uid, displayName: uid, email: null, role, isActive, workspaceId, createdAt: now, updatedAt: now });
+    await profile(ADMIN, "ADMIN", true, WS);
+    await profile(OTHER_ADMIN, "ADMIN", true, OTHER_WS);
+    await profile(STUDENT, "STUDENT", true, WS);
+    await profile(OTHER_STUDENT, "STUDENT", true, WS);
+    await profile(INACTIVE_STUDENT, "STUDENT", false, WS);
+    await profile(SPOOFED_ADMIN, "STUDENT", true, WS);
 
-    await profile(ADMIN, "ADMIN", true);
-    await profile(STUDENT, "STUDENT", true);
-    await profile(OTHER_STUDENT, "STUDENT", true);
-    await profile(INACTIVE_STUDENT, "STUDENT", false);
-    await profile(SPOOFED_ADMIN, "STUDENT", true);
+    for (const [col, ...rest] of SERVER_ONLY) {
+      if (col === "users") continue;
+      await setDoc(doc(db, col, ...rest), { workspaceId: WS, studentId: STUDENT, seeded: true });
+    }
 
-    await setDoc(doc(db, "subjects", "s1"), { ...subjectPayload(), createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "subjects", "s2"), { ...subjectPayload({ slug: "old", isActive: false }), createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "chapters", "c1"), { subjectId: "s1", title: "C", titleAr: "الفصل", description: "", order: 1, isActive: true, createdBy: ADMIN, createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "lessons", "l1"), { subjectId: "s1", chapterId: "c1", title: "L", titleAr: "الدرس", order: 1, isActive: true, createdBy: ADMIN, createdAt: now, updatedAt: now });
-
-    await setDoc(doc(db, "questions", "q1"), { subjectId: "s1", chapterId: "c1", lessonId: "l1", type: "SINGLE_CHOICE", statement: "Q", statementAr: "س", mediaReferences: [], difficulty: "EASY", explanation: "", explanationAr: "", status: "READY", createdBy: ADMIN, createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "questionOptions", "o1"), { questionId: "q1", text: "A", textAr: "أ", order: 1, createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "questionOptions", "o2"), { questionId: "q1", text: "B", textAr: "ب", order: 2, createdAt: now, updatedAt: now });
-    await setDoc(doc(db, "questionAnswerKeys", "q1"), { correctOptionId: "o1", updatedBy: ADMIN, updatedAt: now });
-
-    const examBase = {
-      title: "E", titleAr: "امتحان", description: "", subjectId: "s1", chapterIds: ["c1"], lessonIds: ["l1"],
-      academicYear: "2026", durationSeconds: 1800, maxAttempts: 1, archived: false, questionCount: 1,
-      maxScore: 2, shuffleQuestions: false, shuffleOptions: false, showScoreAfterSubmit: true,
-      showCorrectAnswersAfterSubmit: false, showExplanationsAfterSubmit: false, createdBy: ADMIN,
-      createdAt: now, updatedAt: now, version: 1,
-    };
-    await setDoc(doc(db, "exams", "e_pub"), { ...examBase, status: "PUBLISHED", publishedAt: now });
-    await setDoc(doc(db, "exams", "e_draft"), { ...examBase, status: "DRAFT", publishedAt: null });
-    await setDoc(doc(db, "exams", "e_closed"), { ...examBase, status: "CLOSED", publishedAt: now });
-
-    await setDoc(doc(db, "exams", "e_pub", "questions", "q1"), {
-      questionId: "q1", order: 1, points: 2,
-      questionSnapshot: { type: "SINGLE_CHOICE", statement: "Q", statementAr: "س", explanation: "", explanationAr: "", difficulty: "EASY", mediaReferences: [] },
-      optionsSnapshot: [{ optionId: "o1", text: "A", textAr: "أ", order: 1 }, { optionId: "o2", text: "B", textAr: "ب", order: 2 }],
-      questionVersion: 1,
+    await setDoc(doc(db, "monitorSessions", "e1__stu1"), {
+      studentId: STUDENT, workspaceId: WS, offer, offerFor: null, answer: null, status: "live", updatedAt: now,
     });
-    await setDoc(doc(db, "examAnswerKeys", "e_pub", "items", "q1"), { correctOptionId: "o1", points: 2, gradingVersion: 1 });
-    await setDoc(doc(db, "examAccessCodes", "e_pub"), { code: "ABC234", createdBy: "admin", createdAt: now });
-
-    const attemptBase = { examId: "e_pub", subjectId: "s1", status: "IN_PROGRESS", startedAt: now, deadlineAt: now, submittedAt: null, score: null, maxScore: 2, examVersion: 1, gradingVersion: 1, lastSavedAt: null, createdAt: now, updatedAt: now };
-    await setDoc(doc(db, "attempts", "e_pub__stu1"), { ...attemptBase, studentId: STUDENT });
-    await setDoc(doc(db, "attempts", "e_pub__stu2"), { ...attemptBase, studentId: OTHER_STUDENT });
-    await setDoc(doc(db, "attempts", "e_pub__stu1", "answers", "q1"), { examQuestionId: "q1", selectedOptionId: "o1", savedAt: now });
-
-    const resultBase = { examId: "e_pub", subjectId: "s1", score: 2, maxScore: 2, percentage: 100, submittedAt: now, gradingVersion: 1, createdAt: now };
-    await setDoc(doc(db, "results", "e_pub__stu1"), { ...resultBase, studentId: STUDENT, attemptId: "e_pub__stu1" });
-    await setDoc(doc(db, "results", "e_pub__stu2"), { ...resultBase, studentId: OTHER_STUDENT, attemptId: "e_pub__stu2" });
-
-    await setDoc(doc(db, "auditLogs", "log1"), { actorUid: ADMIN, action: "USER_PROVISIONED", targetType: "user", targetId: STUDENT, timestamp: now, reason: null, metadata: {} });
+    await setDoc(doc(db, "monitorSessions", "e1__stu1", "studentCandidates", "c1"), { candidate: "x", viewerId: "v1" });
+    await setDoc(doc(db, "monitorSessions", "e1__stu1", "adminCandidates", "c1"), { candidate: "y", viewerId: "v1" });
   });
 }
 
@@ -135,407 +104,118 @@ beforeEach(async () => {
   await seed();
 });
 
-describe("unauthenticated requests", () => {
-  it("cannot read any protected collection", async () => {
-    const db = asUser(ANON);
-    await assertFails(getDoc(doc(db, "subjects", "s1")));
-    await assertFails(getDoc(doc(db, "exams", "e_pub")));
-    await assertFails(getDoc(doc(db, "users", STUDENT)));
-    await assertFails(getDoc(doc(db, "attempts", "e_pub__stu1")));
-    await assertFails(getDoc(doc(db, "results", "e_pub__stu1")));
-  });
-});
+describe("server-only data: no client access for any role", () => {
+  const callers: [string, string | null, "ADMIN" | "STUDENT" | undefined][] = [
+    ["unauthenticated", ANON, undefined],
+    ["teacher of the same space", ADMIN, "ADMIN"],
+    ["teacher of another space", OTHER_ADMIN, "ADMIN"],
+    ["the owning student", STUDENT, "STUDENT"],
+    ["a spoofed admin claim", SPOOFED_ADMIN, "ADMIN"],
+  ];
 
-describe("student: profile and role escalation", () => {
-  it("reads own profile", async () => {
-    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "users", STUDENT)));
-  });
-
-  it("cannot read another user's profile", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "users", OTHER_STUDENT)));
-  });
-
-  it("cannot promote self by writing the role field", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(updateDoc(doc(db, "users", STUDENT), { role: "ADMIN" }));
-  });
-
-  it("cannot create or delete profiles", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(setDoc(doc(db, "users", "newbie"), { role: "ADMIN", isActive: true }));
-    await assertFails(deleteDoc(doc(db, "users", STUDENT)));
-  });
-
-  it("a spoofed ADMIN claim with a STUDENT profile gets no admin reads", async () => {
-    await assertFails(getDoc(doc(asUser(SPOOFED_ADMIN, "ADMIN"), "auditLogs", "log1")));
-    await assertFails(getDocs(collection(asUser(SPOOFED_ADMIN, "ADMIN"), "questions")));
-  });
-});
-
-describe("student: curriculum and exam visibility", () => {
-  it("reads active subjects but not inactive ones", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(getDoc(doc(db, "subjects", "s1")));
-    await assertFails(getDoc(doc(db, "subjects", "s2")));
-  });
-
-  it("cannot write subjects", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(setDoc(doc(db, "subjects", "hack"), subjectPayload()));
-    await assertFails(updateDoc(doc(db, "subjects", "s1"), { nameAr: "x", updatedAt: serverTimestamp() }));
-  });
-
-  it("reads PUBLISHED exams only, never DRAFT or CLOSED", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(getDoc(doc(db, "exams", "e_pub")));
-    await assertFails(getDoc(doc(db, "exams", "e_draft")));
-    await assertFails(getDoc(doc(db, "exams", "e_closed")));
-  });
-
-  it("list queries must filter to PUBLISHED; unfiltered list is denied", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(getDocs(query(collection(db, "exams"), where("status", "==", "PUBLISHED"))));
-    await assertFails(getDocs(collection(db, "exams")));
-  });
-
-  it("cannot read the exam question snapshot before the server delivers it", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "exams", "e_pub", "questions", "q1")));
-  });
-
-  it("cannot read or write the question bank or bank answer keys", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(getDoc(doc(db, "questions", "q1")));
-    await assertFails(getDoc(doc(db, "questionOptions", "o1")));
-    await assertFails(getDoc(doc(db, "questionAnswerKeys", "q1")));
-    await assertFails(setDoc(doc(db, "questionAnswerKeys", "q1"), { correctOptionId: "o2" }));
-  });
-});
-
-describe("answer keys", () => {
-  it("student cannot read published answer keys", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "examAnswerKeys", "e_pub", "items", "q1")));
-  });
-
-  it("unauthenticated cannot read published answer keys", async () => {
-    await assertFails(getDoc(doc(asUser(ANON), "examAnswerKeys", "e_pub", "items", "q1")));
-  });
-
-  it("admin client cannot read published answer keys either (server only)", async () => {
-    await assertFails(getDoc(doc(asUser(ADMIN, "ADMIN"), "examAnswerKeys", "e_pub", "items", "q1")));
-  });
-
-  it("nobody can write published answer keys from the client", async () => {
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "examAnswerKeys", "e_pub", "items", "q1"), { correctOptionId: "o2", points: 9, gradingVersion: 1 }));
-  });
-});
-
-describe("exam access codes (server only)", () => {
-  it("student cannot read an exam access code", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "examAccessCodes", "e_pub")));
-  });
-
-  it("admin client cannot read or write access codes either", async () => {
-    await assertFails(getDoc(doc(asUser(ADMIN, "ADMIN"), "examAccessCodes", "e_pub")));
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "examAccessCodes", "e_pub"), { code: "ZZZ999" }));
-  });
-});
-
-describe("attempts: ownership and server-owned writes", () => {
-  it("student reads own attempt", async () => {
-    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "attempts", "e_pub__stu1")));
-  });
-
-  it("student cannot read another student's attempt", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "attempts", "e_pub__stu2")));
-  });
-
-  it("student list must filter by own studentId", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(getDocs(query(collection(db, "attempts"), where("studentId", "==", STUDENT))));
-    await assertFails(getDocs(collection(db, "attempts")));
-  });
-
-  it("student cannot create an attempt directly, even for a published exam", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(setDoc(doc(db, "attempts", "e_pub__extra"), {
-      examId: "e_pub", studentId: STUDENT, status: "IN_PROGRESS", score: 100, maxScore: 2,
-    }));
-    await assertFails(addDoc(collection(db, "attempts"), { examId: "e_pub", studentId: STUDENT, status: "IN_PROGRESS" }));
-  });
-
-  it("student cannot change score or status of own attempt", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(updateDoc(doc(db, "attempts", "e_pub__stu1"), { score: 2, status: "GRADED" }));
-    await assertFails(updateDoc(doc(db, "attempts", "e_pub__stu1"), { deadlineAt: Timestamp.fromMillis(Date.now() + 9e6) }));
-  });
-
-  it("student cannot delete own attempt", async () => {
-    await assertFails(deleteDoc(doc(asUser(STUDENT, "STUDENT"), "attempts", "e_pub__stu1")));
-  });
-
-  it("student cannot create, change, or delete own answers directly", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(setDoc(doc(db, "attempts", "e_pub__stu1", "answers", "q1"), { examQuestionId: "q1", selectedOptionId: "o2", savedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(db, "attempts", "e_pub__stu1", "answers", "q9"), { examQuestionId: "q9", selectedOptionId: "o1", savedAt: serverTimestamp(), awardedPoints: 2 }));
-    await assertFails(deleteDoc(doc(db, "attempts", "e_pub__stu1", "answers", "q1")));
-  });
-
-  it("student reads own answers, not another student's", async () => {
-    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "attempts", "e_pub__stu1", "answers", "q1")));
-    await assertFails(getDoc(doc(asUser(OTHER_STUDENT, "STUDENT"), "attempts", "e_pub__stu1", "answers", "q1")));
-  });
-
-  it("admin cannot create attempts from the client either", async () => {
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "attempts", "forged"), { examId: "e_pub", studentId: STUDENT, status: "GRADED" }));
-  });
-});
-
-describe("results: immutable for students", () => {
-  it("student reads own result", async () => {
-    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "results", "e_pub__stu1")));
-  });
-
-  it("student cannot read another student's result", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "results", "e_pub__stu2")));
-  });
-
-  it("student cannot create, modify, or delete any result, including own", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertFails(setDoc(doc(db, "results", "forged"), { studentId: STUDENT, score: 100, maxScore: 2 }));
-    await assertFails(updateDoc(doc(db, "results", "e_pub__stu1"), { score: 2 }));
-    await assertFails(deleteDoc(doc(db, "results", "e_pub__stu1")));
-  });
-
-  it("nobody, including admin clients, can delete or rewrite results", async () => {
-    const admin = asUser(ADMIN, "ADMIN");
-    await assertFails(deleteDoc(doc(admin, "results", "e_pub__stu1")));
-    await assertFails(updateDoc(doc(admin, "results", "e_pub__stu1"), { score: 0 }));
-  });
-
-  it("student list must filter by own studentId", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(getDocs(query(collection(db, "results"), where("studentId", "==", STUDENT))));
-    await assertFails(getDocs(collection(db, "results")));
-  });
-});
-
-describe("audit log: append-only and admin-read", () => {
-  it("admin reads audit logs", async () => {
-    await assertSucceeds(getDoc(doc(asUser(ADMIN, "ADMIN"), "auditLogs", "log1")));
-  });
-
-  it("student cannot read audit logs", async () => {
-    await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "auditLogs", "log1")));
-  });
-
-  it("nobody can write, edit, or delete audit logs from the client", async () => {
-    const admin = asUser(ADMIN, "ADMIN");
-    await assertFails(addDoc(collection(admin, "auditLogs"), { actorUid: ADMIN, action: "FAKE" }));
-    await assertFails(updateDoc(doc(admin, "auditLogs", "log1"), { action: "EDITED" }));
-    await assertFails(deleteDoc(doc(admin, "auditLogs", "log1")));
-  });
-});
-
-describe("deactivated accounts", () => {
-  it("deactivated student cannot read active subjects, own attempt, or own result", async () => {
-    const db = asUser(INACTIVE_STUDENT, "STUDENT");
-    await assertFails(getDoc(doc(db, "subjects", "s1")));
-    await assertFails(getDoc(doc(db, "exams", "e_pub")));
-    await assertFails(getDoc(doc(db, "attempts", "e_pub__stu1")));
-  });
-});
-
-describe("admin: curriculum writes", () => {
-  it("creates a valid subject", async () => {
-    await assertSucceeds(setDoc(doc(asUser(ADMIN, "ADMIN"), "subjects", "chem"), subjectPayload({ slug: "chemistry", nameAr: "الكيمياء" })));
-  });
-
-  it("rejects a subject with a wrong type or a spoofed createdBy", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertFails(setDoc(doc(db, "subjects", "bad1"), subjectPayload({ order: "first" })));
-    await assertFails(setDoc(doc(db, "subjects", "bad2"), subjectPayload({ createdBy: STUDENT })));
-    await assertFails(setDoc(doc(db, "subjects", "bad3"), subjectPayload({ extraField: true })));
-  });
-
-  it("archives a subject by flag, never by delete", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertSucceeds(updateDoc(doc(db, "subjects", "s1"), { isActive: false, updatedAt: serverTimestamp() }));
-    await assertFails(deleteDoc(doc(db, "subjects", "s1")));
-  });
-
-  it("creates a chapter only under an existing subject", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertSucceeds(setDoc(doc(db, "chapters", "c2"), { subjectId: "s1", titleAr: "فصل", order: 2, isActive: true, createdBy: ADMIN, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(db, "chapters", "c3"), { subjectId: "ghost", titleAr: "فصل", order: 1, isActive: true, createdBy: ADMIN, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-  });
-
-  it("student cannot write curriculum", async () => {
-    await assertFails(setDoc(doc(asUser(STUDENT, "STUDENT"), "chapters", "c9"), { subjectId: "s1", titleAr: "x", order: 1, isActive: true, createdBy: STUDENT, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-  });
-});
-
-describe("admin: question bank and answer keys", () => {
-  it("writes a bank answer key pointing to an option of the same question", async () => {
-    await assertSucceeds(setDoc(doc(asUser(ADMIN, "ADMIN"), "questionAnswerKeys", "q1"), { correctOptionId: "o2", updatedBy: ADMIN, updatedAt: serverTimestamp() }));
-  });
-
-  it("rejects a bank answer key that points to another question's option", async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "questions", "q2"), { subjectId: "s1", chapterId: "c1", lessonId: "l1", type: "TRUE_FALSE", statement: "T", statementAr: "ص", mediaReferences: [], difficulty: "EASY", explanation: "", explanationAr: "", status: "READY", createdBy: ADMIN, createdAt: ts(), updatedAt: ts() });
-      await setDoc(doc(ctx.firestore(), "questionOptions", "other"), { questionId: "q2", text: "T", textAr: "ص", order: 1, createdAt: ts(), updatedAt: ts() });
+  for (const [label, uid, role] of callers) {
+    it(`${label} cannot read, write, or delete any of it`, async () => {
+      const db = asUser(uid, role);
+      for (const [col, ...rest] of SERVER_ONLY) {
+        const ref = doc(db, col, ...rest);
+        await assertFails(getDoc(ref));
+        await assertFails(setDoc(ref, { workspaceId: WS, hacked: true }));
+        await assertFails(deleteDoc(ref));
+      }
     });
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "questionAnswerKeys", "q1"), { correctOptionId: "other", updatedBy: ADMIN, updatedAt: serverTimestamp() }));
-  });
+  }
 
-  it("creates a bank question with valid enum values", async () => {
-    await assertSucceeds(setDoc(doc(asUser(ADMIN, "ADMIN"), "questions", "q5"), { subjectId: "s1", chapterId: "c1", lessonId: "l1", type: "TRUE_FALSE", statement: "T", statementAr: "ص", mediaReferences: [], difficulty: "HARD", explanation: "", explanationAr: "", status: "DRAFT", createdBy: ADMIN, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-  });
-
-  it("rejects an invalid question type and changing an existing question's type", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertFails(setDoc(doc(db, "questions", "q6"), { subjectId: "s1", chapterId: "c1", lessonId: "l1", type: "ESSAY", statement: "E", difficulty: "EASY", status: "READY", createdBy: ADMIN, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(db, "questions", "q1"), { type: "TRUE_FALSE", updatedAt: serverTimestamp() }));
+  it("no role can list subjects, exams, students, results, attempts, or questions", async () => {
+    for (const [uid, role] of [[ADMIN, "ADMIN"], [OTHER_ADMIN, "ADMIN"], [STUDENT, "STUDENT"]] as const) {
+      const db = asUser(uid, role);
+      for (const col of ["subjects", "exams", "users", "results", "attempts", "questions"]) {
+        await assertFails(getDocs(collection(db, col)));
+      }
+    }
   });
 });
 
-describe("admin: exams and exam snapshots", () => {
-  it("creates an exam only as DRAFT", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    const base = { title: "New", titleAr: "جديد", subjectId: "s1", chapterIds: [], lessonIds: [], academicYear: "2026", durationSeconds: 1200, maxAttempts: 1, archived: false, questionCount: 0, maxScore: 0, createdBy: ADMIN, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), version: 1 };
-    await assertSucceeds(setDoc(doc(db, "exams", "e_new"), { ...base, status: "DRAFT", publishedAt: null }));
-    await assertFails(setDoc(doc(db, "exams", "e_direct"), { ...base, status: "PUBLISHED", publishedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(db, "exams", "e_twice"), { ...base, status: "DRAFT", publishedAt: null, maxAttempts: 2 }));
-  });
-
-  it("admin cannot publish, close, or edit a published exam from the client", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertFails(updateDoc(doc(db, "exams", "e_draft"), { status: "PUBLISHED", publishedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(db, "exams", "e_pub"), { title: "changed", updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(db, "exams", "e_pub"), { status: "CLOSED", updatedAt: serverTimestamp() }));
-  });
-
-  it("edits a DRAFT exam", async () => {
-    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "exams", "e_draft"), { title: "renamed", updatedAt: serverTimestamp() }));
-  });
-
-  it("archives a CLOSED exam but cannot change its content", async () => {
-    const db = asUser(ADMIN, "ADMIN");
-    await assertSucceeds(updateDoc(doc(db, "exams", "e_closed"), { archived: true, updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(db, "exams", "e_closed"), { title: "rewritten", updatedAt: serverTimestamp() }));
-  });
-
-  it("never deletes an exam", async () => {
-    await assertFails(deleteDoc(doc(asUser(ADMIN, "ADMIN"), "exams", "e_draft")));
-  });
-
-  it("admin writes exam question snapshots only while the exam is a DRAFT", async () => {
-    const snapshot = {
-      questionId: "q1", order: 1, points: 2,
-      questionSnapshot: { type: "SINGLE_CHOICE", statement: "Q", statementAr: "س", explanation: "", explanationAr: "", difficulty: "EASY", mediaReferences: [] },
-      optionsSnapshot: [{ optionId: "o1", text: "A", textAr: "أ", order: 1 }],
-      questionVersion: 1,
-    };
-    const db = asUser(ADMIN, "ADMIN");
-    await assertSucceeds(setDoc(doc(db, "exams", "e_draft", "questions", "q1"), snapshot));
-    await assertFails(setDoc(doc(db, "exams", "e_pub", "questions", "q2"), { ...snapshot, questionId: "q2" }));
-    await assertFails(updateDoc(doc(db, "exams", "e_pub", "questions", "q1"), { points: 10 }));
-  });
-
-  it("admin cannot slip a non-snapshot field into an exam question", async () => {
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "exams", "e_draft", "questions", "q1"), {
-      questionId: "q1", order: 1, points: 2, correctOptionId: "o1",
-      questionSnapshot: {}, optionsSnapshot: [], questionVersion: 1,
-    }));
-  });
-});
-
-describe("admin: attempts and results are never written from the client", () => {
-  it("admin cannot write results or attempts", async () => {
-    const admin = asUser(ADMIN, "ADMIN");
-    await assertFails(setDoc(doc(admin, "results", "forged2"), { studentId: STUDENT, score: 2, maxScore: 2 }));
-    await assertFails(updateDoc(doc(admin, "attempts", "e_pub__stu1"), { score: 2, status: "GRADED" }));
-  });
-});
-
-describe("camera signaling (monitorSessions)", () => {
-  const offer = { type: "offer", sdp: "v=0" };
-  const answer = { type: "answer", sdp: "v=0" };
-
-  it("student creates a live session only for their own attempt", async () => {
+describe("camera signaling (monitorSessions), scoped to a teacher space", () => {
+  it("the student creates a live session for their own attempt in their own space only", async () => {
     const db = asUser(STUDENT, "STUDENT");
-    await assertSucceeds(setDoc(doc(db, "monitorSessions", "e2e-exam__stu1"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(db, "monitorSessions", "forged"), { studentId: OTHER_STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(db, "monitorSessions", "forged2"), { studentId: STUDENT, offer, answer, status: "live", updatedAt: serverTimestamp() }));
+    const body = { studentId: STUDENT, workspaceId: WS, offer, offerFor: null, answer: null, status: "live", updatedAt: serverTimestamp() };
+    await assertSucceeds(setDoc(doc(db, "monitorSessions", "e2__stu1"), body));
+    await assertFails(setDoc(doc(db, "monitorSessions", "e3__stu1"), { ...body, workspaceId: OTHER_WS }));
+    await assertFails(setDoc(doc(db, "monitorSessions", "e4__stu2"), { ...body, studentId: OTHER_STUDENT }));
+    await assertFails(setDoc(doc(db, "monitorSessions", "e5__stu1"), { ...body, answer }));
   });
 
-  it("only the admin writes the answer; the student cannot forge one", async () => {
+  it("the teacher of the same space reads and answers; another space's teacher cannot", async () => {
+    const same = asUser(ADMIN, "ADMIN");
+    const other = asUser(OTHER_ADMIN, "ADMIN");
+    await assertSucceeds(getDoc(doc(same, "monitorSessions", "e1__stu1")));
+    await assertSucceeds(updateDoc(doc(same, "monitorSessions", "e1__stu1"), { answer, updatedAt: serverTimestamp() }));
+    await assertFails(getDoc(doc(other, "monitorSessions", "e1__stu1")));
+    await assertFails(
+      updateDoc(doc(other, "monitorSessions", "e1__stu1"), { request: { viewerId: "spy", at: serverTimestamp() }, updatedAt: serverTimestamp() }),
+    );
+  });
+
+  it("only the same space's teacher sees and adds ICE candidates", async () => {
+    const same = asUser(ADMIN, "ADMIN");
+    const other = asUser(OTHER_ADMIN, "ADMIN");
+    await assertSucceeds(getDocs(collection(same, "monitorSessions", "e1__stu1", "studentCandidates")));
+    await assertSucceeds(addDoc(collection(same, "monitorSessions", "e1__stu1", "adminCandidates"), { candidate: "z", viewerId: "v2" }));
+    await assertFails(getDocs(collection(other, "monitorSessions", "e1__stu1", "studentCandidates")));
+    await assertFails(addDoc(collection(other, "monitorSessions", "e1__stu1", "adminCandidates"), { candidate: "z", viewerId: "spy" }));
+  });
+
+  it("the student reads their own session and candidates; other students cannot", async () => {
+    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1")));
+    await assertSucceeds(getDocs(collection(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1", "adminCandidates")));
+    await assertFails(getDoc(doc(asUser(OTHER_STUDENT, "STUDENT"), "monitorSessions", "e1__stu1")));
+    await assertFails(addDoc(collection(asUser(OTHER_STUDENT, "STUDENT"), "monitorSessions", "e1__stu1", "studentCandidates"), { candidate: "x" }));
+  });
+
+  it("the student cannot forge an answer or a viewer request, and the teacher cannot rewrite the offer", async () => {
+    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1"), { answer, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1"), { request: { viewerId: "self" }, updatedAt: serverTimestamp() }));
+    await assertFails(
+      updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "e1__stu1"), { offer: { type: "offer", sdp: "forged" }, updatedAt: serverTimestamp() }),
+    );
+  });
+
+  it("a returning viewer asks for a fresh offer, and the student's merge write keeps the request", async () => {
+    await assertSucceeds(
+      updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "e1__stu1"), { request: { viewerId: "v2", at: serverTimestamp() }, updatedAt: serverTimestamp() }),
+    );
+    await assertSucceeds(
+      setDoc(
+        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1"),
+        { studentId: STUDENT, workspaceId: WS, offer, offerFor: "v2", answer: null, status: "live", updatedAt: serverTimestamp() },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("leaving marks the session ended, even after the teacher answered", async () => {
+    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "e1__stu1"), { answer, updatedAt: serverTimestamp() }));
+    await assertSucceeds(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1"), { status: "ended", updatedAt: serverTimestamp() }));
+  });
+
+  it("a session saved before spaces existed gets its space on the student's next write", async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "monitorSessions", "s1"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
+      await setDoc(doc(ctx.firestore(), "monitorSessions", "legacy__stu1"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
     });
-    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s1"), { answer, updatedAt: serverTimestamp() }));
-    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s1"), { answer, updatedAt: serverTimestamp() }));
+    await assertSucceeds(
+      setDoc(
+        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "legacy__stu1"),
+        { studentId: STUDENT, workspaceId: WS, offer, offerFor: null, answer: null, status: "live", updatedAt: serverTimestamp() },
+        { merge: true },
+      ),
+    );
   });
 
-  it("student and admin read the session; other students cannot", async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "monitorSessions", "s2"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
-    });
-    await assertSucceeds(getDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s2")));
-    await assertSucceeds(getDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s2")));
-    await assertFails(getDoc(doc(asUser(OTHER_STUDENT, "STUDENT"), "monitorSessions", "s2")));
-  });
-
-  it("nobody can delete a session, and the admin cannot create an offer", async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "monitorSessions", "s3"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: ts() });
-    });
-    await assertFails(deleteDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s3")));
-    await assertFails(deleteDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "s3")));
-    await assertFails(setDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "s4"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() }));
-  });
-
-  it("reading a session that does not exist yet is denied (so the client must not pre-read)", async () => {
+  it("nobody deletes a session, inactive students get nothing, and pre-reading a missing session is denied", async () => {
+    await assertFails(deleteDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "e1__stu1")));
+    await assertFails(deleteDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "e1__stu1")));
+    await assertFails(getDoc(doc(asUser(INACTIVE_STUDENT, "STUDENT"), "monitorSessions", "e1__stu1")));
     await assertFails(getDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "not-yet")));
-  });
-
-  it("the same full write works for a new session and for a reconnect", async () => {
-    const db = asUser(STUDENT, "STUDENT");
-    const write = () => setDoc(doc(db, "monitorSessions", "reconnect"), { studentId: STUDENT, offer, answer: null, status: "live", updatedAt: serverTimestamp() });
-    await assertSucceeds(write());
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await updateDoc(doc(ctx.firestore(), "monitorSessions", "reconnect"), { answer });
-    });
-    await assertSucceeds(write());
-  });
-
-  it("a returning viewer asks for a fresh offer, and the student answers it for that viewer", async () => {
-    await env.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "monitorSessions", "rejoin"), { studentId: STUDENT, offer, offerFor: null, answer, status: "live", updatedAt: ts() });
-    });
-    const request = { viewerId: "viewer-2", at: serverTimestamp() };
-    await assertSucceeds(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "rejoin"), { request, updatedAt: serverTimestamp() }));
-    // Only an admin asks for a viewer.
-    await assertFails(updateDoc(doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "rejoin"), { request, updatedAt: serverTimestamp() }));
-    // The student's merge write for the new offer keeps the admin's request untouched.
-    await assertSucceeds(
-      setDoc(
-        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "rejoin"),
-        { studentId: STUDENT, offer, offerFor: "viewer-2", answer: null, status: "live", updatedAt: serverTimestamp() },
-        { merge: true },
-      ),
-    );
-    // Admin still cannot rewrite the offer.
-    await assertFails(updateDoc(doc(asUser(ADMIN, "ADMIN"), "monitorSessions", "rejoin"), { offer: { type: "offer", sdp: "forged" }, updatedAt: serverTimestamp() }));
-  });
-
-  it("a brand-new session created with a merge write names no viewer yet", async () => {
-    await assertSucceeds(
-      setDoc(
-        doc(asUser(STUDENT, "STUDENT"), "monitorSessions", "fresh-merge"),
-        { studentId: STUDENT, offer, offerFor: null, answer: null, status: "live", updatedAt: serverTimestamp() },
-        { merge: true },
-      ),
-    );
+    await assertFails(getDoc(doc(asUser(ANON), "monitorSessions", "e1__stu1")));
   });
 });
-

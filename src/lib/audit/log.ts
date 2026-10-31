@@ -1,4 +1,5 @@
 import { FieldValue, type DocumentReference, type Firestore } from "firebase-admin/firestore";
+import type { Actor } from "@/lib/workspace";
 
 export interface AuditEntry {
   action: string;
@@ -15,13 +16,14 @@ export interface AuditEntry {
  */
 export function auditLogWrite(
   db: Firestore,
-  actorUid: string,
+  actor: Actor,
   entry: AuditEntry,
 ): { ref: DocumentReference; data: Record<string, unknown> } {
   return {
     ref: db.collection("auditLogs").doc(),
     data: {
-      actorUid,
+      actorUid: actor.uid,
+      workspaceId: actor.workspaceId,
       action: entry.action,
       targetType: entry.targetType,
       targetId: entry.targetId,

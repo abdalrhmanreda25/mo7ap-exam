@@ -2,11 +2,13 @@ import "server-only";
 
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { DomainError } from "@/lib/server/errors";
+import { inWorkspace, type Actor } from "@/lib/workspace";
 
 /**
  * Question images stored in Firestore (no Firebase Storage needed). Each image is one document,
  * already compressed in the browser and capped well under Firestore's 1 MiB document limit.
- * Clients never read the collection directly; images are served by /api/media/[id] to signed-in users.
+ * Clients never read the collection directly; images are served by /api/media/[id] to signed-in users
+ * of the same teacher space.
  */
 export const MEDIA_COLLECTION = "questionMedia";
 export const MAX_MEDIA_BYTES = 500 * 1024;
@@ -23,17 +25,24 @@ export function parseDataUrl(dataUrl: string): { mime: string; bytes: Buffer } {
   return { mime, bytes };
 }
 
-export async function saveMedia(db: Firestore, actorUid: string, dataUrl: string): Promise<string> {
+export async function saveMedia(db: Firestore, actor: Actor, dataUrl: string): Promise<string> {
   const { mime, bytes } = parseDataUrl(dataUrl);
   const ref = db.collection(MEDIA_COLLECTION).doc();
-  await ref.set({ mime, data: bytes, size: bytes.length, createdBy: actorUid, createdAt: FieldValue.serverTimestamp() });
+  await ref.set({
+    mime,
+    data: bytes,
+    size: bytes.length,
+    workspaceId: actor.workspaceId,
+    createdBy: actor.uid,
+    createdAt: FieldValue.serverTimestamp(),
+  });
   return `/api/media/${ref.id}`;
 }
 
-export async function readMedia(db: Firestore, id: string): Promise<{ mime: string; bytes: Buffer } | null> {
+export async function readMedia(db: Firestore, workspaceId: string, id: string): Promise<{ mime: string; bytes: Buffer } | null> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) return null;
   const snap = await db.collection(MEDIA_COLLECTION).doc(id).get();
-  if (!snap.exists) return null;
+  if (!inWorkspace(snap.data(), workspaceId)) return null;
   const d = snap.data()!;
   return { mime: d.mime as string, bytes: Buffer.from(d.data as Uint8Array) };
 }

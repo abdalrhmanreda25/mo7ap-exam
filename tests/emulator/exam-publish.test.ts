@@ -8,7 +8,8 @@ const questions = await import("@/features/questions/service");
 const exams = await import("@/features/exams/service");
 const { DomainError } = await import("@/lib/server/errors");
 
-const ACTOR = "test-admin";
+const ACTOR = { uid: "test-admin", workspaceId: "main" };
+const WS = ACTOR.workspaceId;
 const db = getAdminDb();
 
 const questionInput = (subjectId: string, chapterId: string, lessonId: string, correct = "b") => ({
@@ -94,12 +95,12 @@ describe("exam composition and publish (Firestore emulator)", () => {
     const examId = await exams.createDraftExam(db, ACTOR, examConfig(fx.subjectId));
     await exams.addQuestionToExam(db, ACTOR, examId, qid, 2);
 
-    const draft = await exams.getExam(db, examId);
+    const draft = await exams.getExam(db, WS, examId);
     expect(draft).toMatchObject({ status: "DRAFT", questionCount: 1, maxScore: 2 });
 
     await exams.publishExam(db, ACTOR, examId);
 
-    const published = await exams.getExam(db, examId);
+    const published = await exams.getExam(db, WS, examId);
     expect(published?.status).toBe("PUBLISHED");
 
     const key = await db.collection("examAnswerKeys").doc(examId).collection("items").doc(qid).get();
@@ -120,7 +121,7 @@ describe("exam composition and publish (Firestore emulator)", () => {
     await db.collection("exams").doc(examId).update({ maxScore: 50 });
 
     await expect(exams.publishExam(db, ACTOR, examId)).rejects.toBeInstanceOf(DomainError);
-    expect((await exams.getExam(db, examId))?.status).toBe("DRAFT");
+    expect((await exams.getExam(db, WS, examId))?.status).toBe("DRAFT");
     const keys = await db.collection("examAnswerKeys").doc(examId).collection("items").get();
     expect(keys.empty).toBe(true);
   });
@@ -161,7 +162,7 @@ describe("exam composition and publish (Firestore emulator)", () => {
 
     const before = await db.collection("exams").doc(examId).collection("questions").doc(qid).get();
 
-    const current = (await questions.getQuestionDetail(db, qid))!;
+    const current = (await questions.getQuestionDetail(db, WS, qid))!;
     const base = { ...questionInput(fx.subjectId, fx.chapterId, fx.lessonId), options: current.options, correctOptionId: current.correctOptionId };
 
     await expect(
@@ -183,14 +184,14 @@ describe("exam composition and publish (Firestore emulator)", () => {
     const examId = await exams.createDraftExam(db, ACTOR, examConfig(fx.subjectId));
     await exams.addQuestionToExam(db, ACTOR, examId, qid, 1);
 
-    const current = (await questions.getQuestionDetail(db, qid))!;
+    const current = (await questions.getQuestionDetail(db, WS, qid))!;
     await questions.updateQuestion(db, ACTOR, qid, {
       ...questionInput(fx.subjectId, fx.chapterId, fx.lessonId),
       statement: "Edited while draft",
       options: current.options,
       correctOptionId: current.correctOptionId,
     });
-    expect((await questions.getQuestionDetail(db, qid))?.statement).toBe("Edited while draft");
+    expect((await questions.getQuestionDetail(db, WS, qid))?.statement).toBe("Edited while draft");
   });
 
   it("a published exam cannot be composed, published again, or archived before close", async () => {
@@ -216,7 +217,7 @@ describe("exam composition and publish (Firestore emulator)", () => {
     await exams.closeExam(db, ACTOR, examId);
     await exams.archiveExam(db, ACTOR, examId);
 
-    const exam = await exams.getExam(db, examId);
+    const exam = await exams.getExam(db, WS, examId);
     expect(exam).toMatchObject({ status: "CLOSED", archived: true });
     const key = await db.collection("examAnswerKeys").doc(examId).collection("items").doc(qid).get();
     expect(key.exists).toBe(true);
@@ -230,14 +231,14 @@ describe("exam composition and publish (Firestore emulator)", () => {
     const examId = await exams.createDraftExam(db, ACTOR, examConfig(fx.subjectId));
     for (const q of [q1, q2, q3]) await exams.addQuestionToExam(db, ACTOR, examId, q, 1);
 
-    await exams.moveQuestionInExam(db, examId, q3, "up");
-    const idsAfterMove = (await exams.getExamComposition(db, examId)).map((i) => i.questionId);
+    await exams.moveQuestionInExam(db, ACTOR, examId, q3, "up");
+    const idsAfterMove = (await exams.getExamComposition(db, WS, examId)).map((i) => i.questionId);
     expect(idsAfterMove).toEqual([q1, q3, q2]);
 
     await exams.removeQuestionFromExam(db, ACTOR, examId, q1);
-    const ordersAfterRemove = (await exams.getExamComposition(db, examId)).map((i) => i.order);
+    const ordersAfterRemove = (await exams.getExamComposition(db, WS, examId)).map((i) => i.order);
     expect(ordersAfterRemove).toEqual([1, 2]);
-    expect((await exams.getExam(db, examId))?.questionCount).toBe(2);
+    expect((await exams.getExam(db, WS, examId))?.questionCount).toBe(2);
   });
 
   it("rejects adding a question from another subject", async () => {

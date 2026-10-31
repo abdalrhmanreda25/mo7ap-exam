@@ -10,6 +10,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/types/firestore";
 import { CameraViewer } from "@/features/monitor/components/camera-viewer";
 import { settleExpiredAttempts } from "@/features/attempts/service";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "كل الكاميرات" };
 
@@ -31,8 +32,13 @@ export default function MonitorAllPage() {
 async function Grid() {
   await connection();
   const db = getAdminDb();
-  await settleExpiredAttempts(db);
-  const active = await db.collection(COLLECTIONS.attempts).where("status", "==", "IN_PROGRESS").get();
+  const { workspaceId } = await requireAdmin();
+  await settleExpiredAttempts(db, { workspaceId });
+  const active = await db
+    .collection(COLLECTIONS.attempts)
+    .where("workspaceId", "==", workspaceId)
+    .where("status", "==", "IN_PROGRESS")
+    .get();
   const rows = await Promise.all(
     active.docs.map(async (doc) => {
       const user = await db.collection(COLLECTIONS.users).doc(doc.data().studentId as string).get();

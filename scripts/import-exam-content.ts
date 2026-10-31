@@ -12,7 +12,10 @@ import { importContentPack, type ContentPack } from "../src/features/content-pac
 const contentFile = process.argv[2] ?? "content/chemistry-ch1-medium.json";
 const pack = JSON.parse(readFileSync(path.resolve(contentFile), "utf8")) as ContentPack;
 
-importContentPack(getAdminDb(), "content-import", pack, console.log)
+// Usage: ... import-exam-content.ts <file> [workspaceId]; the space defaults to main.
+const actor = { uid: "content-import", workspaceId: process.argv[3] ?? "main" };
+
+importContentPack(getAdminDb(), actor, pack, console.log)
   .then((result) => console.log(result.status === "published" ? `exam published ${result.examId} code ${result.accessCode}` : `exam exists ${result.examId}`))
   .catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);

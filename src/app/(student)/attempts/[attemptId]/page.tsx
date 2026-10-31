@@ -29,7 +29,7 @@ async function AttemptContent({ params }: { params: Promise<{ attemptId: string 
   // Camera is required only while the attempt is active. Results are shown without it.
   if (view.status !== "IN_PROGRESS") return <ExamPlayer view={view} />;
   return (
-    <CameraGate attemptId={view.attemptId} studentId={user.uid}>
+    <CameraGate attemptId={view.attemptId} studentId={user.uid} workspaceId={user.workspaceId}>
       <ExamPlayer view={view} />
     </CameraGate>
   );

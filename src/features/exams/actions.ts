@@ -39,15 +39,15 @@ export async function removeExamQuestionAction(examId: string, questionId: strin
 }
 
 export async function moveExamQuestionAction(examId: string, questionId: string, direction: "up" | "down") {
-  return runAdminAction(async () => {
-    await service.moveQuestionInExam(db(), idSchema.parse(examId), idSchema.parse(questionId), z.enum(["up", "down"]).parse(direction));
+  return runAdminAction(async (actor) => {
+    await service.moveQuestionInExam(db(), actor, idSchema.parse(examId), idSchema.parse(questionId), z.enum(["up", "down"]).parse(direction));
     return { id: examId };
   });
 }
 
 export async function setExamQuestionPointsAction(examId: string, questionId: string, points: number) {
-  return runAdminAction(async () => {
-    await service.setQuestionPoints(db(), idSchema.parse(examId), idSchema.parse(questionId), pointsSchema.parse(points));
+  return runAdminAction(async (actor) => {
+    await service.setQuestionPoints(db(), actor, idSchema.parse(examId), idSchema.parse(questionId), pointsSchema.parse(points));
     return { id: examId };
   });
 }

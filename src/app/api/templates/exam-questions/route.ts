@@ -20,11 +20,12 @@ export async function GET(request: Request) {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(examId)) return new Response("Bad examId", { status: 400 });
 
   const db = getAdminDb();
-  const exam = await getExam(db, examId);
+  const exam = await getExam(db, user.workspaceId, examId);
   if (!exam) return new Response("Not found", { status: 404 });
 
   const bank = await db
     .collection(COLLECTIONS.questions)
+    .where("workspaceId", "==", user.workspaceId)
     .where("subjectId", "==", exam.subjectId)
     .where("status", "==", "READY")
     .get();

@@ -27,7 +27,7 @@ async function ExamInstructionsContent({ params }: { params: Promise<{ examId: s
   const { examId } = await params;
   const user = await requireRole("STUDENT");
   const db = getAdminDb();
-  const exam = await getExamForStudent(db, examId, await getStudentGrade(db, user.uid));
+  const exam = await getExamForStudent(db, user.workspaceId, examId, await getStudentGrade(db, user.uid));
   if (!exam) notFound();
   const attempt = await getAttemptIdState(db, user.uid, examId);
 

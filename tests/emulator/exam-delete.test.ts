@@ -9,7 +9,8 @@ const questions = await import("@/features/questions/service");
 const exams = await import("@/features/exams/service");
 
 const db = getAdminDb();
-const ADMIN = "test-admin";
+const ADMIN = { uid: "test-admin", workspaceId: "main" };
+const WS = ADMIN.workspaceId;
 
 async function examWithQuestion(published: boolean) {
   const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -62,6 +63,6 @@ describe("admin exam delete", () => {
     await startWithCode(db, "student-delete-test", examId);
     await expect(exams.deleteExam(db, ADMIN, examId)).rejects.toThrow("أرشفه");
     expect((await db.collection("exams").doc(examId).get()).exists).toBe(true);
-    expect(await exams.countExamAttempts(db, examId)).toBe(1);
+    expect(await exams.countExamAttempts(db, WS, examId)).toBe(1);
   });
 });

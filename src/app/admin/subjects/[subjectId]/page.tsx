@@ -9,6 +9,7 @@ import { CurriculumManager } from "@/features/curriculum/components/curriculum-m
 import { SubjectForm } from "@/features/curriculum/components/subject-form";
 import { getSubject, listChapters, listLessons } from "@/features/curriculum/service";
 import { ImportDialog } from "@/features/import/components/import-dialog";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "تفاصيل المادة" };
 
@@ -24,10 +25,11 @@ async function SubjectDetailContent({ params }: { params: Promise<{ subjectId: s
   await connection();
   const { subjectId } = await params;
   const db = getAdminDb();
-  const subject = await getSubject(db, subjectId);
+  const { workspaceId: ws } = await requireAdmin();
+  const subject = await getSubject(db, ws, subjectId);
   if (!subject) notFound();
 
-  const [chapters, lessons] = await Promise.all([listChapters(db, subjectId), listLessons(db)]);
+  const [chapters, lessons] = await Promise.all([listChapters(db, ws, subjectId), listLessons(db, ws)]);
   const subjectLessons = lessons.filter((lesson) => lesson.subjectId === subjectId);
 
   return (

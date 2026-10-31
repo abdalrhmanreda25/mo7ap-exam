@@ -14,6 +14,7 @@ import { DIFFICULTY_AR, QUESTION_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/label
 import { QUESTION_STATUSES } from "@/types/firestore";
 import { ImportDialog } from "@/features/import/components/import-dialog";
 import { MixedText } from "@/components/feedback/mixed-text";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "بنك الأسئلة" };
 
@@ -49,13 +50,14 @@ async function QuestionsContent({
   await connection();
   const { subjectId, status } = await searchParams;
   const db = getAdminDb();
+  const { workspaceId: ws } = await requireAdmin();
   const statusFilter = QUESTION_STATUSES.find((s) => s === status);
   const [subjects, questions] = await Promise.all([
-    listSubjects(db),
-    listQuestions(db, { subjectId: subjectId || undefined, status: statusFilter }),
+    listSubjects(db, ws),
+    listQuestions(db, ws, { subjectId: subjectId || undefined, status: statusFilter }),
   ]);
   const subjectName = new Map(subjects.map((s) => [s.id, s.nameAr]));
-  const usage = await examUsageByQuestion(db);
+  const usage = await examUsageByQuestion(db, ws);
 
   return (
     <div className="space-y-4">

@@ -4,6 +4,7 @@ import { randomInt } from "node:crypto";
 import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { normalizeAccessCode } from "@/lib/domain/access-code";
 import { gradeOf, type GradeId } from "@/lib/grades";
+import { workspaceOf } from "@/lib/workspace";
 import { attemptIdFor, resultIdFor } from "@/lib/domain/ids";
 import { canTransitionAttempt, decideAnswerSave, decideStart, isDeadlinePassed } from "@/lib/domain/state";
 import { DomainError } from "@/lib/server/errors";
@@ -101,14 +102,17 @@ export async function startExam(db: Firestore, studentId: string, examId: string
     if (attemptSnap.exists) return attemptRef.id;
 
     const examSnap = await tx.get(examRef);
-    if (!examSnap.exists) throw new DomainError("الامتحان غير موجود.");
+    const studentSnap = await tx.get(db.collection(COLLECTIONS.users).doc(studentId));
+    // Another teacher's exam reads exactly like a missing one.
+    if (!examSnap.exists || workspaceOf(examSnap.data()) !== workspaceOf(studentSnap.data())) {
+      throw new DomainError("الامتحان غير موجود.");
+    }
     const exam = examSnap.data() as ExamDoc;
     const decision = decideStart({ status: exam.status as "PUBLISHED", archived: exam.archived });
     if (!decision.allowed) {
       throw new DomainError(decision.reason === "EXAM_ARCHIVED" ? "هذا الامتحان مؤرشف." : "هذا الامتحان غير متاح الآن.");
     }
 
-    const studentSnap = await tx.get(db.collection(COLLECTIONS.users).doc(studentId));
     if (gradeOf(studentSnap.data()?.grade) !== gradeOf(exam.grade)) throw new DomainError("هذا الامتحان ليس لصفك.");
 
     // Only a new start needs the code. Resuming an attempt (refresh, reopened tab) returned above.
@@ -135,6 +139,7 @@ export async function startExam(db: Firestore, studentId: string, examId: string
     tx.set(attemptRef, {
       examId,
       studentId,
+      workspaceId: workspaceOf(examSnap.data()),
       subjectId: exam.subjectId,
       status: "IN_PROGRESS",
       startedAt: Timestamp.fromMillis(now),
@@ -200,6 +205,7 @@ async function finalize(db: Firestore, attemptId: string, submittedAtMs: number)
     if (!resultSnap.exists) {
       tx.set(resultRef, {
         studentId: attempt.studentId,
+        workspaceId: workspaceOf(attempt),
         examId,
         subjectId: exam.subjectId,
         attemptId,
@@ -219,8 +225,12 @@ async function finalize(db: Firestore, attemptId: string, submittedAtMs: number)
  * their own attempt on return, but admin views must not show an abandoned attempt as running,
  * because a running attempt blocks reopen and delete. Optionally limited to one student.
  */
-export async function settleExpiredAttempts(db: Firestore, filter: { studentId?: string } = {}): Promise<number> {
+export async function settleExpiredAttempts(
+  db: Firestore,
+  filter: { workspaceId?: string; studentId?: string } = {},
+): Promise<number> {
   let query: FirebaseFirestore.Query = db.collection(COLLECTIONS.attempts).where("status", "==", "IN_PROGRESS");
+  if (filter.workspaceId) query = query.where("workspaceId", "==", filter.workspaceId);
   if (filter.studentId) query = query.where("studentId", "==", filter.studentId);
   const now = Date.now();
   const expired = (await query.get()).docs.filter((doc) => isDeadlinePassed(millisOf(doc.data().deadlineAt), now));
@@ -367,9 +377,13 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
   };
 }
 
-/** Published exams of one school year. */
-export async function listPublishedExams(db: Firestore, grade: GradeId) {
-  const snap = await db.collection(COLLECTIONS.exams).where("status", "==", "PUBLISHED").get();
+/** Published exams of one teacher space and one school year. */
+export async function listPublishedExams(db: Firestore, workspaceId: string, grade: GradeId) {
+  const snap = await db
+    .collection(COLLECTIONS.exams)
+    .where("workspaceId", "==", workspaceId)
+    .where("status", "==", "PUBLISHED")
+    .get();
   return snap.docs
     .filter((doc) => gradeOf(doc.data().grade) === grade)
     .map((doc) => ({
@@ -383,10 +397,10 @@ export async function listPublishedExams(db: Firestore, grade: GradeId) {
     .sort((a, b) => a.titleAr.localeCompare(b.titleAr, "ar"));
 }
 
-/** A published exam the student may see: another year's exam reads as missing. */
-export async function getExamForStudent(db: Firestore, examId: string, grade: GradeId) {
+/** A published exam the student may see: another teacher's or another year's exam reads as missing. */
+export async function getExamForStudent(db: Firestore, workspaceId: string, examId: string, grade: GradeId) {
   const snap = await db.collection(COLLECTIONS.exams).doc(examId).get();
-  if (!snap.exists) return null;
+  if (!snap.exists || workspaceOf(snap.data()) !== workspaceId) return null;
   const exam = snap.data() as ExamDoc & { description?: string; questionCount: number };
   if (exam.status !== "PUBLISHED" || exam.archived || gradeOf(exam.grade) !== grade) return null;
   return { ...exam, id: snap.id, description: exam.description ?? "" };

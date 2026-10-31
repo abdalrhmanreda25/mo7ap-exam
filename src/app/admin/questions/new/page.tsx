@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { listChapters, listLessons, listSubjects } from "@/features/curriculum/service";
 import { QuestionForm } from "@/features/questions/components/question-form";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "سؤال جديد" };
 
@@ -23,7 +24,8 @@ export default function NewQuestionPage() {
 async function NewQuestionContent() {
   await connection();
   const db = getAdminDb();
-  const [subjects, chapters, lessons] = await Promise.all([listSubjects(db), listChapters(db), listLessons(db)]);
+  const { workspaceId: ws } = await requireAdmin();
+  const [subjects, chapters, lessons] = await Promise.all([listSubjects(db, ws), listChapters(db, ws), listLessons(db, ws)]);
   const catalog = {
     subjects: subjects.filter((s) => s.isActive).map((s) => ({ id: s.id, nameAr: s.nameAr })),
     chapters: chapters.filter((c) => c.isActive).map((c) => ({ id: c.id, subjectId: c.subjectId, titleAr: c.titleAr })),

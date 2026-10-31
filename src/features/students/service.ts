@@ -7,6 +7,7 @@ import { DomainError } from "@/lib/server/errors";
 import { COLLECTIONS, type AttemptStatus } from "@/types/firestore";
 import { settleExpiredAttempts } from "@/features/attempts/service";
 import { gradeOf, type GradeId } from "@/lib/grades";
+import { assertInWorkspace, inWorkspace, type Actor } from "@/lib/workspace";
 
 export interface StudentRow {
   uid: string;
@@ -31,11 +32,11 @@ export interface StudentAttemptRow {
   submittedAtMs: number | null;
 }
 
-export async function listStudents(db: Firestore): Promise<StudentRow[]> {
-  await settleExpiredAttempts(db);
+export async function listStudents(db: Firestore, workspaceId: string): Promise<StudentRow[]> {
+  await settleExpiredAttempts(db, { workspaceId });
   const [users, attempts] = await Promise.all([
-    db.collection(COLLECTIONS.users).where("role", "==", "STUDENT").get(),
-    db.collection(COLLECTIONS.attempts).get(),
+    db.collection(COLLECTIONS.users).where("workspaceId", "==", workspaceId).where("role", "==", "STUDENT").get(),
+    db.collection(COLLECTIONS.attempts).where("workspaceId", "==", workspaceId).get(),
   ]);
   const byStudent = new Map<string, { total: number; completed: number; inProgress: number }>();
   for (const a of attempts.docs) {
@@ -65,9 +66,9 @@ export async function listStudents(db: Firestore): Promise<StudentRow[]> {
     .sort((a, b) => a.displayName.localeCompare(b.displayName, "ar"));
 }
 
-export async function getStudent(db: Firestore, uid: string) {
+export async function getStudent(db: Firestore, workspaceId: string, uid: string) {
   const snap = await db.collection(COLLECTIONS.users).doc(uid).get();
-  if (!snap.exists || snap.data()!.role !== "STUDENT") return null;
+  if (!inWorkspace(snap.data(), workspaceId) || snap.data()!.role !== "STUDENT") return null;
   const d = snap.data()!;
   return { uid, displayName: d.displayName ?? "", email: d.email ?? "", isActive: d.isActive === true, grade: gradeOf(d.grade) };
 }
@@ -77,10 +78,10 @@ export async function getStudentGrade(db: Firestore, uid: string): Promise<Grade
   return gradeOf((await db.collection(COLLECTIONS.users).doc(uid).get()).data()?.grade);
 }
 
-/** Admin adds a student account with a password and a school year. */
+/** A teacher adds a student account, in the teacher's space, with a password and a school year. */
 export async function createStudent(
   db: Firestore,
-  actorUid: string,
+  actor: Actor,
   input: { displayName: string; email: string; password: string; grade: GradeId },
 ): Promise<string> {
   const auth = getAdminAuth();
@@ -93,7 +94,7 @@ export async function createStudent(
   }
   await auth.setCustomUserClaims(uid, { role: "STUDENT" });
 
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "STUDENT_CREATED",
     targetType: "user",
     targetId: uid,
@@ -108,6 +109,7 @@ export async function createStudent(
     role: "STUDENT",
     isActive: true,
     grade: input.grade,
+    workspaceId: actor.workspaceId,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -124,7 +126,8 @@ function accountError(error: unknown): unknown {
   return error;
 }
 
-export async function listStudentAttempts(db: Firestore, uid: string): Promise<StudentAttemptRow[]> {
+export async function listStudentAttempts(db: Firestore, workspaceId: string, uid: string): Promise<StudentAttemptRow[]> {
+  if (!(await getStudent(db, workspaceId, uid))) return [];
   await settleExpiredAttempts(db, { studentId: uid });
   const snap = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).get();
   const examIds = [...new Set(snap.docs.map((d) => d.data().examId as string))];
@@ -154,16 +157,16 @@ export async function listStudentAttempts(db: Firestore, uid: string): Promise<S
  * deterministic attempt ID becomes free, so startExam creates a new attempt.
  * Refused while the attempt is still in progress.
  */
-export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: string, reason: string): Promise<string> {
+export async function reopenAttempt(db: Firestore, actor: Actor, attemptId: string, reason: string): Promise<string> {
   if (attemptId.includes("__v")) throw new DomainError("هذه نسخة محفوظة من محاولة سابقة، وليست المحاولة الحالية.");
-  await settleExpiredAttempts(db);
+  await settleExpiredAttempts(db, { workspaceId: actor.workspaceId });
   const attemptRef = db.collection(COLLECTIONS.attempts).doc(attemptId);
   const resultRef = db.collection(COLLECTIONS.results).doc(attemptId);
 
   const archiveId = await db.runTransaction(async (tx) => {
     const attempt = await tx.get(attemptRef);
-    if (!attempt.exists) throw new DomainError("لا توجد محاولة لهذا الطالب في هذا الامتحان.");
-    const data = attempt.data()!;
+    const data = attempt.data();
+    assertInWorkspace(data, actor.workspaceId, "المحاولة غير موجودة.");
     if (data.status === "IN_PROGRESS") throw new DomainError("المحاولة ما زالت جارية. انتظر حتى تنتهي.");
 
     const versions = await tx.get(
@@ -174,7 +177,7 @@ export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: 
 
     const now = Timestamp.fromMillis(Date.now());
     const archiveRef = db.collection(COLLECTIONS.attempts).doc(archiveId);
-    tx.set(archiveRef, { ...data, superseded: true, supersededAt: now, supersededBy: actorUid, reopenReason: reason, originalAttemptId: attemptId });
+    tx.set(archiveRef, { ...data, superseded: true, supersededAt: now, supersededBy: actor.uid, reopenReason: reason, originalAttemptId: attemptId });
     for (const a of answers.docs) {
       tx.set(archiveRef.collection(COLLECTIONS.attemptAnswers).doc(a.id), a.data());
       tx.delete(a.ref);
@@ -185,7 +188,7 @@ export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: 
     }
     tx.delete(attemptRef);
 
-    const audit = auditLogWrite(db, actorUid, {
+    const audit = auditLogWrite(db, actor, {
       action: "EXAM_REOPENED_FOR_STUDENT",
       targetType: "attempt",
       targetId: attemptId,
@@ -202,28 +205,28 @@ export async function reopenAttempt(db: Firestore, actorUid: string, attemptId: 
 }
 
 /** Reopens every finished, current attempt of an exam. In-progress attempts are left alone. */
-export async function reopenExamForAll(db: Firestore, actorUid: string, examId: string, reason: string) {
-  await settleExpiredAttempts(db);
+export async function reopenExamForAll(db: Firestore, actor: Actor, examId: string, reason: string) {
+  await settleExpiredAttempts(db, { workspaceId: actor.workspaceId });
   const exam = await db.collection(COLLECTIONS.exams).doc(examId).get();
-  if (!exam.exists) throw new DomainError("الامتحان غير موجود.");
+  assertInWorkspace(exam.data(), actor.workspaceId, "الامتحان غير موجود.");
   const snap = await db.collection(COLLECTIONS.attempts).where("examId", "==", examId).get();
   const targets = snap.docs.filter((d) => !d.data().superseded && d.data().status !== "IN_PROGRESS");
   let reopened = 0;
   for (const t of targets) {
-    await reopenAttempt(db, actorUid, t.id, reason);
+    await reopenAttempt(db, actor, t.id, reason);
     reopened++;
   }
   const skipped = snap.docs.filter((d) => !d.data().superseded && d.data().status === "IN_PROGRESS").length;
   return { reopened, skipped, closed: exam.data()!.status !== "PUBLISHED" };
 }
 
-export async function setStudentActive(db: Firestore, actorUid: string, uid: string, active: boolean) {
-  const student = await getStudent(db, uid);
+export async function setStudentActive(db: Firestore, actor: Actor, uid: string, active: boolean) {
+  const student = await getStudent(db, actor.workspaceId, uid);
   if (!student) throw new DomainError("الطالب غير موجود.");
   const auth = getAdminAuth();
   await auth.updateUser(uid, { disabled: !active });
   if (!active) await auth.revokeRefreshTokens(uid);
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: active ? "USER_ACTIVATED" : "USER_DEACTIVATED",
     targetType: "user",
     targetId: uid,
@@ -265,17 +268,19 @@ export interface StudentStats {
 }
 
 /** Statistics from persisted, current (non-superseded) attempts only. No estimates. */
-export async function getStudentStats(db: Firestore, uid: string): Promise<StudentStats> {
+export async function getStudentStats(db: Firestore, workspaceId: string, uid: string): Promise<StudentStats> {
   await settleExpiredAttempts(db, { studentId: uid });
-  const attemptsSnap = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).get();
+  const attemptsSnap = (await getStudent(db, workspaceId, uid))
+    ? await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).get()
+    : { docs: [] };
   const current = attemptsSnap.docs.filter((d) => !d.data().superseded);
   const finished = current.filter((d) => d.data().status !== "IN_PROGRESS");
 
   const examIds = [...new Set(finished.map((d) => d.data().examId as string))];
   const [examDocs, subjectsSnap, lessonsSnap] = await Promise.all([
     Promise.all(examIds.map((id) => db.collection(COLLECTIONS.exams).doc(id).get())),
-    db.collection(COLLECTIONS.subjects).get(),
-    db.collection(COLLECTIONS.lessons).get(),
+    db.collection(COLLECTIONS.subjects).where("workspaceId", "==", workspaceId).get(),
+    db.collection(COLLECTIONS.lessons).where("workspaceId", "==", workspaceId).get(),
   ]);
   const examById = new Map(examDocs.map((e) => [e.id, e.data()]));
   const subjectName = new Map(subjectsSnap.docs.map((s) => [s.id, (s.data().nameAr as string) ?? ""]));
@@ -377,11 +382,11 @@ export async function getStudentStats(db: Firestore, uid: string): Promise<Stude
 
 export async function updateStudent(
   db: Firestore,
-  actorUid: string,
+  actor: Actor,
   uid: string,
   input: { displayName: string; email: string; password?: string; grade?: GradeId },
 ) {
-  const student = await getStudent(db, uid);
+  const student = await getStudent(db, actor.workspaceId, uid);
   if (!student) throw new DomainError("الطالب غير موجود.");
   const auth = getAdminAuth();
   const email = input.email.trim().toLowerCase();
@@ -396,7 +401,7 @@ export async function updateStudent(
   }
   if (input.password) await auth.revokeRefreshTokens(uid);
 
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "STUDENT_UPDATED",
     targetType: "user",
     targetId: uid,
@@ -423,14 +428,14 @@ export async function updateStudent(
  * Removes the login and profile. Attempts and results stay as history (audited).
  * Refused while the student is in the middle of an exam.
  */
-export async function deleteStudent(db: Firestore, actorUid: string, uid: string) {
-  await settleExpiredAttempts(db, { studentId: uid });
-  const student = await getStudent(db, uid);
+export async function deleteStudent(db: Firestore, actor: Actor, uid: string) {
+  const student = await getStudent(db, actor.workspaceId, uid);
   if (!student) throw new DomainError("الطالب غير موجود.");
+  await settleExpiredAttempts(db, { studentId: uid });
   const active = await db.collection(COLLECTIONS.attempts).where("studentId", "==", uid).where("status", "==", "IN_PROGRESS").limit(1).get();
   if (!active.empty) throw new DomainError("الطالب في امتحان الآن. انتظر حتى ينتهي ثم احذف الحساب.");
 
-  const audit = auditLogWrite(db, actorUid, {
+  const audit = auditLogWrite(db, actor, {
     action: "STUDENT_DELETED",
     targetType: "user",
     targetId: uid,
@@ -445,8 +450,8 @@ export async function deleteStudent(db: Firestore, actorUid: string, uid: string
   await db.collection(COLLECTIONS.users).doc(uid).delete();
 }
 
-export async function studentPasswordLink(db: Firestore, uid: string): Promise<string> {
-  const student = await getStudent(db, uid);
+export async function studentPasswordLink(db: Firestore, workspaceId: string, uid: string): Promise<string> {
+  const student = await getStudent(db, workspaceId, uid);
   if (!student?.email) throw new DomainError("لا يوجد بريد لهذا الطالب.");
   return getAdminAuth().generatePasswordResetLink(student.email);
 }

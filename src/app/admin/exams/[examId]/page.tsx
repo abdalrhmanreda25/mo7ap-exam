@@ -17,6 +17,7 @@ import { CloneExamButton } from "@/features/exams/components/clone-exam-button";
 import { AccessCodePanel } from "@/features/exams/components/access-code-panel";
 import { EXAM_STATUS_AR, QUESTION_TYPE_AR } from "@/lib/labels";
 import { ImportDialog } from "@/features/import/components/import-dialog";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "تفاصيل الامتحان" };
 
@@ -32,14 +33,15 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
   await connection();
   const { examId } = await params;
   const db = getAdminDb();
-  const exam = await getExam(db, examId);
+  const { workspaceId: ws } = await requireAdmin();
+  const exam = await getExam(db, ws, examId);
   if (!exam) notFound();
 
-  const [composition, subjects] = await Promise.all([getExamComposition(db, examId), listSubjects(db)]);
+  const [composition, subjects] = await Promise.all([getExamComposition(db, ws, examId), listSubjects(db, ws)]);
   const issues = exam.status === "DRAFT" ? readinessIssues(composition, exam.durationSeconds, exam.maxScore) : [];
   const pool =
     exam.status === "DRAFT"
-      ? await listAddableQuestions(db, exam.subjectId, composition.map((c) => c.questionId))
+      ? await listAddableQuestions(db, ws, exam.subjectId, composition.map((c) => c.questionId))
       : [];
 
   const items: ComposedItem[] = composition.map((c) => ({
@@ -55,7 +57,7 @@ async function ExamDetailContent({ params }: { params: Promise<{ examId: string 
     mediaReferences: c.bank?.mediaReferences ?? [],
   }));
 
-  const [attemptCount, accessCode] = await Promise.all([countExamAttempts(db, examId), getAccessCode(db, examId)]);
+  const [attemptCount, accessCode] = await Promise.all([countExamAttempts(db, ws, examId), getAccessCode(db, ws, examId)]);
 
   const tone = exam.status === "PUBLISHED" ? "success" : exam.status === "DRAFT" ? "primary" : "neutral";
 

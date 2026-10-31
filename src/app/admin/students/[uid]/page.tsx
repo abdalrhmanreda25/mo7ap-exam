@@ -10,6 +10,7 @@ import { getStudent, getStudentStats, listStudentAttempts } from "@/features/stu
 import { gradeLabel } from "@/lib/grades";
 import { DeleteStudentButton, StudentEditForm } from "@/features/students/components/student-manage";
 import { ActiveToggle, ReopenAttemptButton } from "@/features/students/components/student-actions";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "الطالب" };
 
@@ -27,9 +28,10 @@ async function StudentContent({ params }: { params: Promise<{ uid: string }> }) 
   await connection();
   const { uid } = await params;
   const db = getAdminDb();
-  const student = await getStudent(db, uid);
+  const { workspaceId: ws } = await requireAdmin();
+  const student = await getStudent(db, ws, uid);
   if (!student) notFound();
-  const [attempts, stats] = await Promise.all([listStudentAttempts(db, uid), getStudentStats(db, uid)]);
+  const [attempts, stats] = await Promise.all([listStudentAttempts(db, ws, uid), getStudentStats(db, ws, uid)]);
   const current = attempts.filter((a) => !a.superseded);
   const history = attempts.filter((a) => a.superseded);
 

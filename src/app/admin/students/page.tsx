@@ -10,6 +10,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { listStudents } from "@/features/students/service";
 import { AddStudentForm } from "@/features/students/components/add-student-form";
 import { gradeLabel } from "@/lib/grades";
+import { requireAdmin } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "الطلاب" };
 
@@ -29,7 +30,8 @@ export default function StudentsPage() {
 
 async function StudentsList() {
   await connection();
-  const students = await listStudents(getAdminDb());
+  const { workspaceId } = await requireAdmin();
+  const students = await listStudents(getAdminDb(), workspaceId);
   if (students.length === 0) {
     return <EmptyState icon={Users} title="لا يوجد طلاب" description="أضف أول طالب من «إضافة طالب» بالأعلى." />;
   }
