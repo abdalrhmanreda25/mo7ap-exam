@@ -56,7 +56,12 @@ test.describe("Camera monitoring (live, no storage)", () => {
     await admin.goto("/admin/monitor/all");
     await expect(admin.getByText("مباشر", { exact: true }).first()).toBeVisible({ timeout: 60000 });
 
+    // Student's tab closes without a clean exit: the viewer says the student does not reply.
     await studentCtx.close();
+    await admin.goto(viewerUrl);
+    await expect(admin.getByText("الطالب لا يرد")).toBeVisible({ timeout: 30000 });
+    await expect(admin.getByRole("button", { name: "حاول مرة أخرى" })).toBeVisible();
+
     await adminCtx.close();
   });
 });

@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 
 type Status = "waiting" | "connecting" | "live" | "ended" | "elsewhere" | "error";
+type Hint = "noReply" | "network";
 interface Offer {
   type: RTCSdpType;
   sdp: string;
@@ -32,9 +33,11 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
   const claimRef = useRef<() => void>(() => undefined);
   const [status, setStatus] = useState<Status>("waiting");
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<Hint | null>(null);
 
   useEffect(() => {
-    const viewerId = crypto.randomUUID();
+    // A retry takes a new viewer ID: the student reconnects only when the requested viewer changes.
+    let viewerId = crypto.randomUUID();
     let cancelled = false;
     let pc: RTCPeerConnection | null = null;
     let answeredSdp: string | null = null;
@@ -42,6 +45,16 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
     let remoteReady = false;
     const pendingCandidates: RTCIceCandidateInit[] = [];
     const unsubs: (() => void)[] = [];
+    // If nothing arrives in time, say why instead of showing "connecting" forever.
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const expect = (ms: number, reason: Hint) => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => !cancelled && setHint(reason), ms);
+    };
+    const settle = () => {
+      clearTimeout(watchdog);
+      setHint(null);
+    };
     const sessionRef = doc(getClientDb(), SESSION_COLLECTION, attemptId);
 
     const closePeer = () => {
@@ -52,8 +65,12 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
     };
 
     const claim = () => {
+      closePeer();
+      viewerId = crypto.randomUUID();
       requested = true;
       setStatus("connecting");
+      setHint(null);
+      expect(15_000, "noReply");
       updateDoc(sessionRef, { request: { viewerId, at: serverTimestamp() }, updatedAt: serverTimestamp() }).catch((err: { code?: string }) => {
         if (!cancelled) {
           setStatus("error");
@@ -83,6 +100,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
         if (peer.connectionState === "connected") {
           setStatus("live");
           setError(null);
+          settle();
         }
         if (peer.connectionState === "failed") {
           setStatus("error");
@@ -97,6 +115,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
       await peer.setLocalDescription(local);
       if (pc !== peer || cancelled) return;
       await updateDoc(sessionRef, { answer: { type: local.type, sdp: local.sdp }, updatedAt: serverTimestamp() });
+      expect(20_000, "network");
     };
 
     const watch = () => {
@@ -108,6 +127,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
             if (!data || cancelled) return;
             if (data.status === "ended") {
               closePeer();
+              settle();
               setStatus("ended");
               return;
             }
@@ -119,6 +139,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
             if (requester && requester !== viewerId) {
               // A newer viewer (another tab or window) took over. Do not fight it.
               closePeer();
+              settle();
               setStatus("elsewhere");
               return;
             }
@@ -181,6 +202,7 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(watchdog);
       unsubs.forEach((u) => u());
       closePeer();
     };
@@ -207,6 +229,18 @@ export function CameraViewer({ attemptId }: { attemptId: string }) {
           <span>الكاميرا معروضة الآن في نافذة أو صفحة أخرى.</span>
           <Button type="button" size="sm" variant="outline" onClick={() => claimRef.current()}>
             اعرضها هنا
+          </Button>
+        </div>
+      )}
+      {hint && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
+          <span>
+            {hint === "noReply"
+              ? "الطالب لا يرد. اطلب منه تحديث صفحة الامتحان، أو ربما أغلقها."
+              : "وصل رد الطالب لكن الفيديو لا يمر عبر الشبكة. جرّب شبكة أخرى للطالب (مثل Wi-Fi بدل بيانات الهاتف)."}
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={() => claimRef.current()}>
+            حاول مرة أخرى
           </Button>
         </div>
       )}
