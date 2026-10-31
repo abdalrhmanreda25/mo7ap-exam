@@ -56,6 +56,7 @@ test.describe("Student exam flow with timer", () => {
     await expect(page.getByText(/5\s*\/\s*5/).first()).toBeVisible();
     await expect(page.getByText("100%")).toBeVisible();
 
+    await page.screenshot({ path: "/private/tmp/claude-501/-Users-abdalrhmanreda-Codex-React-mo7ap-exam/1b2eed21-c7dd-446d-a42f-2a62459a69b9/scratchpad/result.png", fullPage: true });
     // Reload keeps the result.
     await page.reload();
     await expect(page.getByText("100%")).toBeVisible();

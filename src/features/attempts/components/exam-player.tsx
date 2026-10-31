@@ -94,8 +94,10 @@ export function ExamPlayer({ view }: { view: AttemptView }) {
   const submit = () =>
     startTransition(async () => {
       const result = await submitAttemptAction(view.attemptId);
-      if (reportResult(result, "تم تسليم الامتحان.")) router.refresh();
-      else router.refresh();
+      reportResult(result, "تم تسليم الامتحان.");
+      // Fullscreen is only for the active attempt. Leave it before the result renders.
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
+      router.refresh();
     });
 
   const timerTone =
@@ -268,31 +270,31 @@ function ResultPanel({ view, expired }: { view: AttemptView; expired: boolean })
         )}
       </section>
 
-      {result?.correct || result?.explanations ? (
-        <section className="space-y-4">
-          <h2 className="font-bold">مراجعة الأسئلة</h2>
-          {view.questions.map((q) => {
-            const mine = view.answers[q.examQuestionId];
-            const right = result.correct?.[q.examQuestionId];
-            const correctIndex = right ? q.options.findIndex((o) => o.id === right) : null;
-            return (
-              <div key={q.examQuestionId} className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  السؤال {q.order} · {mine === right ? "إجابة صحيحة" : mine ? "إجابة خاطئة" : "بدون إجابة"}
-                </p>
-                <QuestionPreview
-                  statementAr={q.statementAr}
-                  statement={q.statement}
-                  options={q.options}
-                  correctIndex={correctIndex}
-                  explanationAr={result.explanations?.[q.examQuestionId]}
-                  media={q.mediaReferences}
-                />
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
+      <section className="space-y-4">
+        <h2 className="font-bold">إجاباتك</h2>
+        {view.questions.map((q) => {
+          const mine = view.answers[q.examQuestionId];
+          const right = result?.correct?.[q.examQuestionId];
+          const correctIndex = right ? q.options.findIndex((o) => o.id === right) : null;
+          const status = !mine ? "بدون إجابة" : !right ? "تمت الإجابة" : mine === right ? "إجابة صحيحة" : "إجابة خاطئة";
+          return (
+            <div key={q.examQuestionId} className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                السؤال {q.order} · {status}
+              </p>
+              <QuestionPreview
+                statementAr={q.statementAr}
+                statement={q.statement}
+                options={q.options}
+                correctIndex={correctIndex}
+                selectedId={mine}
+                explanationAr={result?.explanations?.[q.examQuestionId]}
+                media={q.mediaReferences}
+              />
+            </div>
+          );
+        })}
+      </section>
     </div>
   );
 }

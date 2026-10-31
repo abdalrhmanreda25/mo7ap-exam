@@ -6,13 +6,15 @@ const ARABIC_LETTERS = ["أ", "ب", "ج", "د", "هـ", "و"];
 /**
  * Renders a question the way a student sees it. Bidi isolation keeps mixed Arabic and
  * English (and LTR notation such as x² or 2+2) readable inside RTL text.
- * When correctIndex is given (admin preview only), the correct option is marked.
+ * When correctIndex is given, the correct option is marked. When selectedId is given (student result),
+ * the student's own choice is marked too.
  */
 export function QuestionPreview({
   statementAr,
   statement,
   options,
   correctIndex,
+  selectedId,
   explanationAr,
   media = [],
 }: {
@@ -20,6 +22,7 @@ export function QuestionPreview({
   statement: string;
   options: { id: string; textAr: string; text: string }[];
   correctIndex?: number | null;
+  selectedId?: string;
   explanationAr?: string;
   media?: string[];
 }) {
@@ -33,17 +36,28 @@ export function QuestionPreview({
       <ol className="space-y-2">
         {options.map((option, index) => {
           const isCorrect = correctIndex === index;
+          const isMine = selectedId === option.id;
+          const knownWrong = isMine && !isCorrect && correctIndex != null;
           return (
             <li
               key={option.id}
               className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
-                isCorrect ? "border-success/40 bg-success/5" : "border-border"
+                isCorrect
+                  ? "border-success/40 bg-success/5"
+                  : knownWrong
+                    ? "border-destructive/40 bg-destructive/5"
+                    : isMine
+                      ? "border-primary bg-accent"
+                      : "border-border"
               }`}
             >
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
                 {ARABIC_LETTERS[index] ?? index + 1}
               </span>
               <MixedText className="flex-1" text={option.textAr.trim() || option.text || "الخيار"} />
+              {isMine && (
+                <span className={`text-xs font-medium ${knownWrong ? "text-destructive" : "text-foreground"}`}>إجابتك</span>
+              )}
               {isCorrect && <span className="text-xs font-medium text-success">الإجابة الصحيحة</span>}
             </li>
           );
