@@ -276,11 +276,13 @@ function ResultPanel({ view, expired }: { view: AttemptView; expired: boolean })
           const mine = view.answers[q.examQuestionId];
           const right = result?.correct?.[q.examQuestionId];
           const correctIndex = right ? q.options.findIndex((o) => o.id === right) : null;
-          const status = !mine ? "بدون إجابة" : !right ? "تمت الإجابة" : mine === right ? "إجابة صحيحة" : "إجابة خاطئة";
+          const verdict = mine ? result?.verdicts[q.examQuestionId] : undefined;
+          const status = !mine ? "بدون إجابة" : verdict ? "إجابة صحيحة" : "إجابة خاطئة";
+          const tone = !mine ? "text-muted-foreground" : verdict ? "text-success" : "text-destructive";
           return (
             <div key={q.examQuestionId} className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                السؤال {q.order} · {status}
+                السؤال {q.order} · <span className={`font-medium ${tone}`}>{status}</span>
               </p>
               <QuestionPreview
                 statementAr={q.statementAr}
@@ -288,6 +290,7 @@ function ResultPanel({ view, expired }: { view: AttemptView; expired: boolean })
                 options={q.options}
                 correctIndex={correctIndex}
                 selectedId={mine}
+                selectedVerdict={verdict}
                 explanationAr={result?.explanations?.[q.examQuestionId]}
                 media={q.mediaReferences}
               />

@@ -15,6 +15,7 @@ export function QuestionPreview({
   options,
   correctIndex,
   selectedId,
+  selectedVerdict,
   explanationAr,
   media = [],
 }: {
@@ -23,6 +24,8 @@ export function QuestionPreview({
   options: { id: string; textAr: string; text: string }[];
   correctIndex?: number | null;
   selectedId?: string;
+  /** Whether the student's choice is right. Known even when the correct option is hidden. */
+  selectedVerdict?: boolean;
   explanationAr?: string;
   media?: string[];
 }) {
@@ -35,9 +38,9 @@ export function QuestionPreview({
       <QuestionMedia urls={media} />
       <ol className="space-y-2">
         {options.map((option, index) => {
-          const isCorrect = correctIndex === index;
           const isMine = selectedId === option.id;
-          const knownWrong = isMine && !isCorrect && correctIndex != null;
+          const isCorrect = correctIndex === index || (isMine && selectedVerdict === true);
+          const knownWrong = isMine && !isCorrect && (selectedVerdict === false || correctIndex != null);
           return (
             <li
               key={option.id}
@@ -56,9 +59,11 @@ export function QuestionPreview({
               </span>
               <MixedText className="flex-1" text={option.textAr.trim() || option.text || "الخيار"} />
               {isMine && (
-                <span className={`text-xs font-medium ${knownWrong ? "text-destructive" : "text-foreground"}`}>إجابتك</span>
+                <span className={`text-xs font-medium ${knownWrong ? "text-destructive" : isCorrect ? "text-success" : "text-foreground"}`}>
+                  إجابتك
+                </span>
               )}
-              {isCorrect && <span className="text-xs font-medium text-success">الإجابة الصحيحة</span>}
+              {isCorrect && !isMine && <span className="text-xs font-medium text-success">الإجابة الصحيحة</span>}
             </li>
           );
         })}

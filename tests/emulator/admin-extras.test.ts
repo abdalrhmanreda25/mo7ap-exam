@@ -72,7 +72,10 @@ describe("admin extras (emulator)", () => {
     const id = await startWithCode(db, "rp-student", examId);
     await attempts.saveAnswer(db, "rp-student", id, qid, "b", 1);
     await attempts.submitAttempt(db, "rp-student", id);
-    expect((await attempts.getAttemptView(db, "rp-student", id))!.result!.correct).toBeNull();
+    const hidden = (await attempts.getAttemptView(db, "rp-student", id))!.result!;
+    expect(hidden.correct).toBeNull();
+    // Right or wrong is always shown, even when the correct option is hidden.
+    expect(hidden.verdicts).toEqual({ [qid]: true });
 
     await exams.updateReviewPolicy(db, ADMIN, examId, { showScoreAfterSubmit: true, showCorrectAnswersAfterSubmit: true, showExplanationsAfterSubmit: false });
     expect((await attempts.getAttemptView(db, "rp-student", id))!.result!.correct?.[qid]).toBe("b");

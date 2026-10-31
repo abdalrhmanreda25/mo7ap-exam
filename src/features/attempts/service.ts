@@ -51,6 +51,8 @@ export interface AttemptView {
     percentage: number | null;
     /** Present only when the exam's review policy allows it. */
     correct: Record<string, string> | null;
+    /** Right (true) or wrong (false) per answered question. Always present; does not reveal the correct option. */
+    verdicts: Record<string, boolean>;
     explanations: Record<string, string> | null;
   };
 }
@@ -325,12 +327,13 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
 
   let result: AttemptView["result"] = null;
   if (finished) {
-    let correct: Record<string, string> | null = null;
     let explanations: Record<string, string> | null = null;
-    if (exam.showCorrectAnswersAfterSubmit) {
-      const keys = await db.collection(COLLECTIONS.examAnswerKeys).doc(examId).collection("items").get();
-      correct = Object.fromEntries(keys.docs.map((d) => [d.id, d.data().correctOptionId as string]));
-    }
+    const keys = await db.collection(COLLECTIONS.examAnswerKeys).doc(examId).collection("items").get();
+    const key = Object.fromEntries(keys.docs.map((d) => [d.id, d.data().correctOptionId as string]));
+    const correct = exam.showCorrectAnswersAfterSubmit ? key : null;
+    const verdicts = Object.fromEntries(
+      answersSnap.docs.map((d) => [d.id, d.data().selectedOptionId === key[d.id]]),
+    );
     if (exam.showExplanationsAfterSubmit) {
       explanations = Object.fromEntries(questions.map((q) => [q.examQuestionId, q.explanationAr || q.explanation]));
     }
@@ -342,6 +345,7 @@ export async function getAttemptView(db: Firestore, studentId: string, attemptId
       maxScore,
       percentage: showScore && maxScore > 0 ? Math.round(((attempt.score as number) / maxScore) * 10000) / 100 : null,
       correct,
+      verdicts,
       explanations,
     };
   }
